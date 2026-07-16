@@ -30,7 +30,10 @@ du texte qui t'est soumis.
 
 MÉTHODE :
 Tu reçois un texte extrait d'un contenu web (réseau social, commentaire, \
-article, message de chat). Tu dois produire une analyse structurée en \
+article, message de chat). Le processus se déroule en deux temps : d'abord \
+tu utilises l'outil \`web_search\` autant que nécessaire (jusqu'à 3 \
+recherches) pour trouver de vraies sources primaires officielles ; ensuite, \
+une fois tes recherches terminées, tu produis une analyse structurée en \
 appelant l'outil \`submit_reality_check\`, en respectant strictement les \
 définitions suivantes.
 
@@ -77,33 +80,43 @@ variable, quelle période ou quel élément de contexte manque, de façon \
 neutre et factuelle. Si aucun problème n'est détecté, renvoie une chaîne \
 vide.
 
-4. VERIFICATION (pièce à conviction) :
-   - Une requête de recherche courte, neutre, composée de mots-clés (pas \
-une phrase, pas de jugement), permettant à l'utilisateur de retrouver la \
-donnée d'origine directement à la source.
+4. SOURCES (pièces à conviction) :
+   - Une liste de 0 à 3 sources RÉELLES, trouvées via l'outil \`web_search\`, \
+chacune avec son URL exacte et une description neutre d'une phrase de ce \
+qu'elle confirme ou infirme. N'invente JAMAIS une URL que tu n'as pas \
+obtenue par une recherche effective : une URL non vérifiée est pire \
+qu'aucune source.
    - Cible en priorité les sources primaires officielles pertinentes selon \
 le sujet : INSEE, Légifrance, Cour des comptes, Eurostat, INED, ministères, \
 organismes académiques (HAL, CNRS), rapports parlementaires, ou \
 équivalents internationaux reconnus (OCDE, ONU, Banque mondiale) si le \
 sujet est international.
-   - Ne mentionne jamais de site militant, de média d'opinion ou de source \
-secondaire non officielle.
+   - Ne cite jamais de site militant, de média d'opinion ou de source \
+secondaire non officielle si une source primaire équivalente existe.
    - Si le texte est une opinion pure sans aucune affirmation factuelle \
 rattachable (statut "Hors-sujet" sans donnée chiffrée ni fait vérifiable \
-sous-jacent), renvoie une chaîne vide : il n'y a rien à vérifier.
+sous-jacent), ou si aucune recherche n'a abouti à une source fiable, \
+renvoie une liste vide : il n'y a rien à citer.
 
 FORMAT DE SORTIE :
-Tu dois OBLIGATOIREMENT appeler l'outil \`submit_reality_check\` avec les \
-quatre champs \`statut\`, \`rhetorique\`, \`contexte\`, \`verification\`. Ne \
-produis aucun texte en dehors de l'appel d'outil. N'ajoute aucune formule \
-de politesse, aucun avertissement, aucune méta-explication.`;
+Une fois tes recherches terminées, tu dois OBLIGATOIREMENT appeler l'outil \
+\`submit_reality_check\` avec les quatre champs \`statut\`, \`rhetorique\`, \
+\`contexte\`, \`sources\`. Ne produis aucun texte en dehors de l'appel \
+d'outil final. N'ajoute aucune formule de politesse, aucun avertissement, \
+aucune méta-explication.`;
+
+const WEB_SEARCH_TOOL = {
+  type: "web_search_20260209",
+  name: "web_search",
+  max_uses: 3,
+};
 
 const REALITY_CHECK_TOOL = {
   name: TOOL_NAME,
   description:
     "Soumet l'analyse factuelle et rhétorique structurée d'un texte, " +
     "selon les quatre axes statut / rhetorique / contexte / " +
-    "verification définis dans les instructions système.",
+    "sources définis dans les instructions système.",
   input_schema: {
     type: "object",
     properties: {
@@ -156,15 +169,31 @@ const REALITY_CHECK_TOOL = {
         },
         required: ["probleme_detecte", "explication"],
       },
-      verification: {
-        type: "string",
+      sources: {
+        type: "array",
         description:
-          "Requête de recherche neutre par mots-clés ciblant des " +
-          "sources primaires officielles. Chaîne vide si le texte " +
-          "ne contient aucune affirmation factuelle vérifiable.",
+          "Sources réelles trouvées via web_search (0 à 3). Liste vide " +
+          "si le texte ne contient aucune affirmation factuelle " +
+          "vérifiable ou si aucune recherche n'a abouti.",
+        items: {
+          type: "object",
+          properties: {
+            url: {
+              type: "string",
+              description: "URL exacte de la source, obtenue via web_search.",
+            },
+            description: {
+              type: "string",
+              description:
+                "Description neutre d'une phrase de ce que la source " +
+                "confirme ou infirme.",
+            },
+          },
+          required: ["url", "description"],
+        },
       },
     },
-    required: ["statut", "rhetorique", "contexte", "verification"],
+    required: ["statut", "rhetorique", "contexte", "sources"],
   },
 };
 
@@ -183,7 +212,18 @@ function buildUserPrompt(text, sourceUrl) {
     );
   }
   lines.push(
-    "\nAppelle l'outil submit_reality_check avec ton analyse structurée."
+    "\nUtilise web_search si besoin, puis appelle l'outil " +
+      "submit_reality_check avec ton analyse structurée."
   );
   return lines.join("\n");
+}
+
+/** Message de relance forçant l'appel final de l'outil après la recherche. */
+function buildFinalizePrompt() {
+  return (
+    "Tes recherches sont terminées. Appelle maintenant l'outil " +
+    "submit_reality_check avec ton analyse structurée finale. Le champ " +
+    "sources doit contenir uniquement des URLs réelles obtenues via " +
+    "web_search ci-dessus, jamais une URL inventée."
+  );
 }

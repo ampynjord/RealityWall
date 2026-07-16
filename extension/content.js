@@ -85,7 +85,7 @@ function renderLoading() {
     </div>
     <div class="rw-body rw-loading">
       <div class="rw-spinner" aria-hidden="true"></div>
-      <p>Analyse en cours…</p>
+      <p>Recherche de sources et analyse en cours…</p>
     </div>
   `;
   positionOverlay(overlay);
@@ -138,16 +138,23 @@ function renderContexteSection(contexte) {
   `;
 }
 
-function renderVerificationSection(verification) {
-  if (!verification) {
-    return '<p class="rw-empty">Aucune vérification pertinente pour ce texte.</p>';
+function renderSourcesSection(sources) {
+  if (!Array.isArray(sources) || sources.length === 0) {
+    return '<p class="rw-empty">Aucune source trouvée pour ce texte.</p>';
   }
-  return `
-    <div class="rw-verification">
-      <code>${escapeHtml(verification)}</code>
-      <button type="button" class="rw-copy">Copier</button>
-    </div>
-  `;
+
+  const items = sources
+    .map(
+      (source) => `
+      <li class="rw-source-item">
+        <a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.url)}</a>
+        <p>${escapeHtml(source.description)}</p>
+      </li>
+    `
+    )
+    .join("");
+
+  return `<ul class="rw-source-list">${items}</ul>`;
 }
 
 function renderResult(data) {
@@ -172,29 +179,14 @@ function renderResult(data) {
         ${renderContexteSection(data.contexte)}
       </div>
       <div class="rw-section">
-        <span class="rw-label">Pièce à conviction</span>
-        ${renderVerificationSection(data.verification)}
+        <span class="rw-label">Sources</span>
+        ${renderSourcesSection(data.sources)}
       </div>
     </div>
   `;
 
   positionOverlay(overlay);
   bindClose(overlay);
-
-  const copyButton = overlay.querySelector(".rw-copy");
-  if (copyButton) {
-    copyButton.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(data.verification || "");
-        copyButton.textContent = "Copié !";
-      } catch (error) {
-        copyButton.textContent = "Erreur";
-      }
-      setTimeout(() => {
-        copyButton.textContent = "Copier";
-      }, 1500);
-    });
-  }
 }
 
 function renderError(message) {

@@ -23,10 +23,12 @@ if (typeof importScripts === "function") {
 const api = typeof browser !== "undefined" ? browser : chrome;
 
 const MENU_ID = "reality-wall-debunk";
+const MENU_ID_PAGE = "reality-wall-debunk-page";
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 const ANTHROPIC_MODEL = "claude-sonnet-5";
 const MAX_INPUT_CHARS = 4000;
+const MAX_SEARCH_TOKENS = 2048;
 const MAX_OUTPUT_TOKENS = 1024;
 
 const STATUT_VALUES = ["Vrai", "Faux", "Incomplet", "Raccourci", "Hors-sujet"];
@@ -42,6 +44,11 @@ api.runtime.onInstalled.addListener(() => {
     id: MENU_ID,
     title: "Débunker avec RealityWall",
     contexts: ["selection"],
+  });
+  api.contextMenus.create({
+    id: MENU_ID_PAGE,
+    title: "Débunker toute la page avec RealityWall",
+    contexts: ["page"],
   });
 });
 
@@ -82,8 +89,13 @@ function validateRealityCheckResult(data) {
   if (typeof data.contexte.explication !== "string") {
     throw new Error("Réponse du modèle non conforme : contexte.explication invalide.");
   }
-  if (typeof data.verification !== "string") {
-    throw new Error("Réponse du modèle non conforme : verification invalide.");
+  if (!Array.isArray(data.sources)) {
+    throw new Error("Réponse du modèle non conforme : sources doit être une liste.");
+  }
+  for (const item of data.sources) {
+    if (!item || typeof item.url !== "string" || !item.url || typeof item.description !== "string" || !item.description) {
+      throw new Error("Réponse du modèle non conforme : élément sources invalide.");
+    }
   }
   return data;
 }
@@ -115,7 +127,7 @@ function extractToolInput(responseBody) {
   throw new Error("Le modèle n'a pas renvoyé d'analyse structurée.");
 }
 
-async function callAnthropic(apiKey, text, sourceUrl) {
+async function postMessages(apiKey, body) {
   const response = await fetch(ANTHROPIC_API_URL, {
     method: "POST",
     headers: {
@@ -124,23 +136,47 @@ async function callAnthropic(apiKey, text, sourceUrl) {
       "anthropic-version": ANTHROPIC_VERSION,
       "anthropic-dangerous-direct-browser-access": "true",
     },
-    body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
-      max_tokens: MAX_OUTPUT_TOKENS,
-      system: SYSTEM_PROMPT,
-      tools: [REALITY_CHECK_TOOL],
-      tool_choice: { type: "tool", name: TOOL_NAME },
-      messages: [{ role: "user", content: buildUserPrompt(text, sourceUrl) }],
-    }),
+    body: JSON.stringify(body),
   });
 
-  const body = await response.json().catch(() => null);
-
+  const parsed = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(friendlyApiError(response.status, body));
+    throw new Error(friendlyApiError(response.status, parsed));
   }
+  return parsed;
+}
 
-  return validateRealityCheckResult(extractToolInput(body));
+/**
+ * Deux appels successifs : le premier laisse le modèle chercher librement
+ * de vraies sources via web_search (tool_choice auto), le second force
+ * l'appel de submit_reality_check une fois les recherches terminées, pour
+ * que le champ sources cite des URLs réellement trouvées plutôt qu'une
+ * simple requête de recherche inventée.
+ */
+async function callAnthropic(apiKey, text, sourceUrl) {
+  const messages = [{ role: "user", content: buildUserPrompt(text, sourceUrl) }];
+
+  const searchBody = await postMessages(apiKey, {
+    model: ANTHROPIC_MODEL,
+    max_tokens: MAX_SEARCH_TOKENS,
+    system: SYSTEM_PROMPT,
+    tools: [WEB_SEARCH_TOOL],
+    messages,
+  });
+
+  messages.push({ role: "assistant", content: searchBody.content });
+  messages.push({ role: "user", content: buildFinalizePrompt() });
+
+  const finalBody = await postMessages(apiKey, {
+    model: ANTHROPIC_MODEL,
+    max_tokens: MAX_OUTPUT_TOKENS,
+    system: SYSTEM_PROMPT,
+    tools: [REALITY_CHECK_TOOL],
+    tool_choice: { type: "tool", name: TOOL_NAME },
+    messages,
+  });
+
+  return validateRealityCheckResult(extractToolInput(finalBody));
 }
 
 async function analyzeAndNotify(text, tab) {
@@ -177,37 +213,61 @@ async function analyzeAndNotify(text, tab) {
   }
 }
 
+async function getSelectionText(tabId) {
+  try {
+    const results = await api.scripting.executeScript({
+      target: { tabId },
+      func: () => window.getSelection?.().toString() ?? "",
+    });
+    return results?.[0]?.result || "";
+  } catch (error) {
+    console.warn("RealityWall: impossible de lire la sélection de la page.", error);
+    return "";
+  }
+}
+
+async function getPageText(tabId) {
+  try {
+    const results = await api.scripting.executeScript({
+      target: { tabId },
+      func: () => document.body?.innerText ?? "",
+    });
+    return results?.[0]?.result || "";
+  } catch (error) {
+    console.warn("RealityWall: impossible de lire le contenu de la page.", error);
+    return "";
+  }
+}
+
 api.contextMenus.onClicked.addListener(async (info, tab) => {
-  if (info.menuItemId !== MENU_ID) {
+  if (info.menuItemId === MENU_ID) {
+    await analyzeAndNotify(info.selectionText || "", tab);
     return;
   }
-  await analyzeAndNotify(info.selectionText || "", tab);
+  if (info.menuItemId === MENU_ID_PAGE) {
+    if (!tab || typeof tab.id !== "number") {
+      return;
+    }
+    const pageText = await getPageText(tab.id);
+    await analyzeAndNotify(pageText, tab);
+  }
 });
 
 // Clic sur l'icône de la barre d'outils : analyse la sélection en cours sur
-// la page. Seul déclencheur disponible là où contextMenus n'existe pas
-// (Firefox pour Android). Fonctionne aussi sur desktop, en complément du
-// clic droit. Sans sélection, ouvre les réglages par défaut.
+// la page si elle existe, sinon la page entière. Seul déclencheur
+// disponible là où contextMenus n'existe pas (Firefox pour Android).
+// Fonctionne aussi sur desktop, en complément du clic droit.
 api.action.onClicked.addListener(async (tab) => {
   if (!tab || typeof tab.id !== "number") {
     return;
   }
 
-  let selectionText = "";
-  try {
-    const results = await api.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => window.getSelection?.().toString() ?? "",
-    });
-    selectionText = results?.[0]?.result || "";
-  } catch (error) {
-    console.warn("RealityWall: impossible de lire la sélection de la page.", error);
-  }
-
-  if (!selectionText.trim()) {
-    await api.runtime.openOptionsPage();
+  const selectionText = await getSelectionText(tab.id);
+  if (selectionText.trim()) {
+    await analyzeAndNotify(selectionText, tab);
     return;
   }
 
-  await analyzeAndNotify(selectionText, tab);
+  const pageText = await getPageText(tab.id);
+  await analyzeAndNotify(pageText, tab);
 });
