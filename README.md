@@ -1,5 +1,8 @@
 # RealityWall
 
+[![CI et publication de l'extension](https://github.com/ampynjord/RealityWall/actions/workflows/ci.yml/badge.svg)](https://github.com/ampynjord/RealityWall/actions/workflows/ci.yml)
+[![Dernière release](https://img.shields.io/github/v/release/ampynjord/RealityWall?label=extension)](https://github.com/ampynjord/RealityWall/releases/latest)
+
 Un mur de faits infranchissable face à la mauvaise foi numérique.
 
 RealityWall est une extension de navigateur (Chrome et Firefox, desktop et
@@ -20,6 +23,7 @@ primaires officielles permettant de vérifier par soi-même.
 - [Architecture](#architecture)
 - [Démarrage rapide (moins de 2 minutes)](#démarrage-rapide-moins-de-2-minutes)
 - [Configuration du backend](#configuration-du-backend)
+- [Télécharger l'extension déjà empaquetée](#télécharger-lextension-déjà-empaquetée)
 - [Charger l'extension dans le navigateur](#charger-lextension-dans-le-navigateur)
 - [Lancer les tests](#lancer-les-tests)
 - [Le moteur de qualification des faits](#le-moteur-de-qualification-des-faits)
@@ -121,6 +125,24 @@ Toute la configuration passe par des variables d'environnement, lues depuis
 | `PORT`                | `8000`                                   | Port d'écoute d'uvicorn.                       |
 | `CORS_ORIGIN_REGEX`   | origines `chrome-extension://` / `moz-extension://` / `localhost` | Regex des origines HTTP autorisées. |
 | `MAX_INPUT_CHARS`     | `4000`                                   | Troncature du texte envoyé au modèle.          |
+
+## Télécharger l'extension déjà empaquetée
+
+Pas envie de cloner le dépôt ni d'installer Python juste pour l'extension ?
+Chaque push sur `main` publie automatiquement un `.zip` prêt à l'emploi sur
+la page des releases :
+
+**[github.com/ampynjord/RealityWall/releases/latest](https://github.com/ampynjord/RealityWall/releases/latest)**
+
+Téléchargez `realitywall-extension-vX.Y.Z.zip`, décompressez-le dans un
+dossier, puis suivez les instructions de chargement ci-dessous (le dossier
+décompressé remplace le dossier `extension/` du dépôt). Le backend reste à
+installer séparément (voir [Démarrage rapide](#démarrage-rapide-moins-de-2-minutes)) :
+l'extension seule ne fonctionne pas sans lui.
+
+Chaque exécution du pipeline CI (`.github/workflows/ci.yml`) publie aussi
+l'archive en tant qu'*artifact* du run, téléchargeable depuis l'onglet
+**Actions** du dépôt — pratique pour tester une pull request avant fusion.
 
 ## Charger l'extension dans le navigateur
 
