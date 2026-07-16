@@ -36,6 +36,9 @@ jobs:
       - name: Valider manifest.json
         run: python3 -c "import json; json.load(open('extension/manifest.json'))"
 
+      - name: Vérifier la syntaxe des scripts de l'extension
+        run: node -c extension/prompts.js && node -c extension/background.js && node -c extension/content.js && node -c extension/options/options.js
+
       - name: Lire la version de l'extension
         id: version
         run: |

@@ -9,30 +9,47 @@
     <main class="rw-options">
       <h1>RealityWall</h1>
       <p class="rw-subtitle">
-        Configurez l'adresse du backend d'analyse. La clé API Anthropic
-        reste toujours côté serveur, jamais dans cette extension.
+        RealityWall appelle directement l'API Anthropic avec votre propre
+        clé : elle est stockée uniquement sur cet appareil et n'est jamais
+        envoyée ailleurs qu'à <code>api.anthropic.com</code>.
       </p>
 
       <form id="options-form">
-        <label for="backend-url">URL du backend</label>
-        <input
-          type="url"
-          id="backend-url"
-          name="backend-url"
-          placeholder="https://realitywall.ampynjord.bzh"
-          required
-        />
+        <label for="api-key">Clé API Anthropic</label>
+        <div class="rw-key-row">
+          <input
+            type="password"
+            id="api-key"
+            name="api-key"
+            placeholder="sk-ant-..."
+            autocomplete="off"
+            required
+          />
+          <button type="button" id="toggle-key" class="rw-secondary">
+            Afficher
+          </button>
+        </div>
         <button type="submit">Enregistrer</button>
       </form>
 
       <p id="status" class="rw-status" role="status"></p>
 
       <section class="rw-help">
+        <h2>Comment obtenir une clé API</h2>
+        <ol>
+          <li>
+            Créez un compte sur
+            <a href="https://platform.claude.com" target="_blank" rel="noopener">
+              platform.claude.com</a
+            >, la console Anthropic.
+          </li>
+          <li>Générez une clé API dans les réglages de votre compte.</li>
+          <li>Collez-la ci-dessus et enregistrez.</li>
+        </ol>
         <h2>Utilisation</h2>
         <ol>
-          <li>Démarrez le backend RealityWall (voir le README du projet).</li>
           <li>Sélectionnez un texte sur n'importe quelle page web.</li>
-          <li>Clic droit → « Débunker avec RealityWall ».</li>
+          <li>Clic droit → « Débunker avec RealityWall » (ou touchez l'icône de l'extension sur mobile).</li>
         </ol>
       </section>
     </main>

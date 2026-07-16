@@ -8,15 +8,34 @@
  *   texte courante. C'est le seul chemin utilisable sur Firefox pour
  *   Android, qui ne supporte pas contextMenus.
  *
- * La clé API Anthropic ne transite jamais ici : ce script ne fait qu'un
- * POST vers le backend que l'utilisateur a démarré, et relaie le résultat
- * au content script pour affichage.
+ * Appelle directement l'API Anthropic avec la clé fournie par
+ * l'utilisateur dans la page de réglages (BYOK) : aucun backend
+ * intermédiaire, la clé ne quitte jamais l'appareil de l'utilisateur si ce
+ * n'est vers api.anthropic.com.
  */
+
+if (typeof importScripts === "function") {
+  // Service worker classique (Chrome) : prompts.js n'est pas chargé via le
+  // tableau "scripts" du manifest, contrairement à Firefox.
+  importScripts("prompts.js");
+}
 
 const api = typeof browser !== "undefined" ? browser : chrome;
 
 const MENU_ID = "reality-wall-debunk";
-const DEFAULT_BACKEND_URL = "https://realitywall.ampynjord.bzh";
+const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_VERSION = "2023-06-01";
+const ANTHROPIC_MODEL = "claude-sonnet-5";
+const MAX_INPUT_CHARS = 4000;
+const MAX_OUTPUT_TOKENS = 1024;
+
+const STATUT_VALUES = ["Vrai", "Faux", "Incomplet", "Raccourci", "Hors-sujet"];
+const RHETORIQUE_VALUES = [
+  "Ad Hominem / Association",
+  "Homme de Paille (Strawman)",
+  "Faux Dilemme",
+  "Diversion / Esquive",
+];
 
 api.runtime.onInstalled.addListener(() => {
   api.contextMenus.create({
@@ -26,11 +45,11 @@ api.runtime.onInstalled.addListener(() => {
   });
 });
 
-async function getBackendUrl() {
-  const { backendUrl } = await api.storage.sync.get({
-    backendUrl: DEFAULT_BACKEND_URL,
+async function getApiKey() {
+  const { anthropicApiKey } = await api.storage.local.get({
+    anthropicApiKey: "",
   });
-  return backendUrl.replace(/\/+$/, "");
+  return anthropicApiKey.trim();
 }
 
 async function notifyContentScript(tabId, message) {
@@ -39,6 +58,85 @@ async function notifyContentScript(tabId, message) {
   } catch (error) {
     console.warn("RealityWall: impossible de contacter le content script.", error);
   }
+}
+
+/** Valide la sortie du modèle par rapport au contrat à quatre axes. */
+function validateRealityCheckResult(data) {
+  if (!data || typeof data !== "object") {
+    throw new Error("Réponse du modèle non conforme : objet attendu.");
+  }
+  if (!STATUT_VALUES.includes(data.statut)) {
+    throw new Error(`Réponse du modèle non conforme : statut invalide "${data.statut}".`);
+  }
+  if (!Array.isArray(data.rhetorique)) {
+    throw new Error("Réponse du modèle non conforme : rhetorique doit être une liste.");
+  }
+  for (const item of data.rhetorique) {
+    if (!item || !RHETORIQUE_VALUES.includes(item.type) || typeof item.explication !== "string" || !item.explication) {
+      throw new Error("Réponse du modèle non conforme : élément rhetorique invalide.");
+    }
+  }
+  if (!data.contexte || typeof data.contexte.probleme_detecte !== "boolean") {
+    throw new Error("Réponse du modèle non conforme : contexte invalide.");
+  }
+  if (typeof data.contexte.explication !== "string") {
+    throw new Error("Réponse du modèle non conforme : contexte.explication invalide.");
+  }
+  if (typeof data.verification !== "string") {
+    throw new Error("Réponse du modèle non conforme : verification invalide.");
+  }
+  return data;
+}
+
+function friendlyApiError(status, body) {
+  const apiMessage = body && body.error && body.error.message ? body.error.message : "";
+  if (status === 401) {
+    return "Clé API Anthropic invalide ou manquante. Vérifiez-la dans les réglages de l'extension.";
+  }
+  if (status === 429) {
+    return "Limite de débit de l'API Anthropic atteinte. Réessayez dans quelques instants.";
+  }
+  if (status === 402 || status === 403) {
+    return `Accès refusé par l'API Anthropic (${status}) : ${apiMessage || "vérifiez votre compte et vos crédits."}`;
+  }
+  return `Erreur API Anthropic (${status}) : ${apiMessage || "réponse inattendue."}`;
+}
+
+function extractToolInput(responseBody) {
+  const blocks = Array.isArray(responseBody.content) ? responseBody.content : [];
+  for (const block of blocks) {
+    if (block.type === "tool_use" && block.name === TOOL_NAME) {
+      return block.input;
+    }
+  }
+  throw new Error("Le modèle n'a pas renvoyé d'analyse structurée.");
+}
+
+async function callAnthropic(apiKey, text, sourceUrl) {
+  const response = await fetch(ANTHROPIC_API_URL, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": ANTHROPIC_VERSION,
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: MAX_OUTPUT_TOKENS,
+      system: SYSTEM_PROMPT,
+      tools: [REALITY_CHECK_TOOL],
+      tool_choice: { type: "tool", name: TOOL_NAME },
+      messages: [{ role: "user", content: buildUserPrompt(text, sourceUrl) }],
+    }),
+  });
+
+  const body = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(friendlyApiError(response.status, body));
+  }
+
+  return validateRealityCheckResult(extractToolInput(body));
 }
 
 async function analyzeAndNotify(text, tab) {
@@ -51,23 +149,24 @@ async function analyzeAndNotify(text, tab) {
     return;
   }
 
+  const apiKey = await getApiKey();
+  if (!apiKey) {
+    await notifyContentScript(tab.id, {
+      type: "REALITYWALL_ERROR",
+      message:
+        "Aucune clé API Anthropic configurée. Ouvrez les réglages de l'extension pour en renseigner une.",
+    });
+    await api.runtime.openOptionsPage();
+    return;
+  }
+
   await notifyContentScript(tab.id, { type: "REALITYWALL_LOADING" });
 
+  const truncated = cleaned.length > MAX_INPUT_CHARS ? cleaned.slice(0, MAX_INPUT_CHARS) : cleaned;
+
   try {
-    const backendUrl = await getBackendUrl();
-    const response = await fetch(`${backendUrl}/analyze`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: cleaned, url: tab.url || null }),
-    });
-
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new Error(`Le backend a répondu ${response.status} : ${errorBody}`);
-    }
-
-    const data = await response.json();
-    await notifyContentScript(tab.id, { type: "REALITYWALL_RESULT", payload: data });
+    const result = await callAnthropic(apiKey, truncated, tab.url || null);
+    await notifyContentScript(tab.id, { type: "REALITYWALL_RESULT", payload: result });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await notifyContentScript(tab.id, { type: "REALITYWALL_ERROR", message });

@@ -207,8 +207,8 @@ function renderError(message) {
     <div class="rw-body">
       <p class="rw-error">Erreur : ${escapeHtml(message)}</p>
       <p class="rw-error-hint">
-        Vérifiez que le backend RealityWall est démarré et accessible
-        (voir la page de réglages de l'extension).
+        Vérifiez votre clé API Anthropic dans la page de réglages de
+        l'extension.
       </p>
     </div>
   `;
