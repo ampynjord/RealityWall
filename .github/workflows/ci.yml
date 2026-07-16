@@ -1,0 +1,90 @@
+name: CI et publication de l'extension
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    name: Tests backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Installer les dépendances
+        run: pip install -r backend/requirements-dev.txt
+
+      - name: Lancer la suite de tests
+        run: pytest -v
+
+  package:
+    name: Empaqueter l'extension
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Valider manifest.json
+        run: python3 -c "import json; json.load(open('extension/manifest.json'))"
+
+      - name: Lire la version de l'extension
+        id: version
+        run: |
+          VERSION=$(python3 -c "import json; print(json.load(open('extension/manifest.json'))['version'])" | tr -d '[:space:]')
+          if ! [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){0,3}$ ]]; then
+            echo "::error::Version invalide dans manifest.json : '$VERSION' (format attendu : 1 à 4 entiers séparés par des points, ex. 1.0.0)"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Créer l'archive de l'extension
+        run: |
+          mkdir -p dist
+          cd extension
+          zip -r "../dist/realitywall-extension-v${{ steps.version.outputs.version }}.zip" . -x ".*"
+
+      - name: Publier l'archive comme artifact du run
+        uses: actions/upload-artifact@v4
+        with:
+          name: realitywall-extension
+          path: dist/*.zip
+          retention-days: 90
+
+  release:
+    name: Publier la release GitHub
+    needs: package
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: realitywall-extension
+          path: dist
+
+      - name: Créer ou mettre à jour la release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.package.outputs.version }}
+        run: |
+          TAG="extension-v${VERSION}"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.zip --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" dist/*.zip \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "RealityWall extension v${VERSION}" \
+              --notes "Extension RealityWall prête à télécharger et installer (Chrome, Firefox desktop et Firefox Android). Téléchargez le .zip, décompressez-le, puis suivez les instructions \"Charger l'extension\" du README."
+          fi
