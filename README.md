@@ -138,7 +138,7 @@ sur la page des releases — même contenu, un nom par plateforme :
 | --- | --- | --- |
 | Chrome / Edge / Brave (desktop) | `realitywall-extension-chrome-vX.Y.Z.zip` | Décompressez, puis « Charger l'extension non empaquetée » |
 | Firefox (desktop) | `realitywall-extension-firefox-desktop-vX.Y.Z.xpi` | Chargez directement via `about:debugging` |
-| Firefox pour Android | `realitywall-extension-firefox-android-vX.Y.Z.xpi` | Même fichier, via le pont de débogage distant |
+| Firefox pour Android | `realitywall-extension-firefox-android-vX.Y.Z.xpi` | Contenu identique au paquet Firefox desktop, via le pont de débogage distant |
 
 Voir la section [Charger l'extension dans le navigateur](#charger-lextension-dans-le-navigateur)
 ci-dessous pour le détail de chaque étape. Le backend reste à installer

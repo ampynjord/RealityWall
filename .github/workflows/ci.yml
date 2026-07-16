@@ -93,7 +93,7 @@ jobs:
 
           - **Chrome / Edge / Brave** : \`realitywall-extension-chrome-v${VERSION}.zip\` — décompressez puis « Charger l'extension non empaquetée ».
           - **Firefox desktop** : \`realitywall-extension-firefox-desktop-v${VERSION}.xpi\` — chargez directement via about:debugging → « Charger un module complémentaire temporaire ».
-          - **Firefox Android** : \`realitywall-extension-firefox-android-v${VERSION}.xpi\` — même fichier, à charger via le pont de débogage distant (voir le README).
+          - **Firefox Android** : \`realitywall-extension-firefox-android-v${VERSION}.xpi\` — contenu identique au paquet Firefox desktop, à charger via le pont de débogage distant (voir le README).
 
           Voir le README pour les instructions détaillées."
 
