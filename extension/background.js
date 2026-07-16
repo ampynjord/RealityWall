@@ -91,6 +91,9 @@ function validateRealityCheckResult(data) {
 function friendlyApiError(status, body) {
   const apiMessage = body && body.error && body.error.message ? body.error.message : "";
   if (status === 401) {
+    if (apiMessage.includes("anthropic-dangerous-direct-browser-access")) {
+      return `Erreur de configuration de l'extension (en-tête manquant) : ${apiMessage}`;
+    }
     return "Clé API Anthropic invalide ou manquante. Vérifiez-la dans les réglages de l'extension.";
   }
   if (status === 429) {
@@ -119,6 +122,7 @@ async function callAnthropic(apiKey, text, sourceUrl) {
       "content-type": "application/json",
       "x-api-key": apiKey,
       "anthropic-version": ANTHROPIC_VERSION,
+      "anthropic-dangerous-direct-browser-access": "true",
     },
     body: JSON.stringify({
       model: ANTHROPIC_MODEL,
