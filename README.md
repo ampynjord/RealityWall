@@ -47,27 +47,39 @@ automatiquement.
 
 ## Fonctionnement
 
-Deux déclencheurs équivalents, selon ce que votre navigateur permet :
+Deux façons d'analyser un texte, et deux déclencheurs selon ce que votre
+navigateur permet :
 
-- **Desktop (Chrome, Firefox)** : sélectionnez un texte, clic droit →
-  **Débunker avec RealityWall**.
-- **Partout, y compris Firefox pour Android** (qui ne supporte pas les
-  menus contextuels) : sélectionnez un texte puis touchez/cliquez l'icône
-  RealityWall de la barre d'outils — elle analyse la sélection en cours.
-  Sans sélection, un clic sur l'icône ouvre simplement la page de réglages.
+- **Analyser une sélection** — **Desktop (Chrome, Firefox)** : sélectionnez
+  un texte, clic droit → **Débunker avec RealityWall**. **Partout, y compris
+  Firefox pour Android** (qui ne supporte pas les menus contextuels) :
+  sélectionnez un texte puis touchez/cliquez l'icône RealityWall de la barre
+  d'outils.
+- **Analyser toute la page** — clic droit n'importe où (sans sélection) →
+  **Débunker toute la page avec RealityWall** ; ou cliquez l'icône de la
+  barre d'outils sans rien sélectionner au préalable.
 
-Dans les deux cas, la suite est identique :
+Dans tous les cas, la suite est identique :
 
-1. L'extension envoie le texte sélectionné **directement** à l'API Claude
-   (Anthropic, `api.anthropic.com`), authentifiée avec la clé API que vous
-   avez renseignée dans les réglages de l'extension.
-2. L'appel force l'utilisation d'un outil (`tool_choice`) sur un schéma
-   JSON strict, garantissant une sortie structurée et jamais du texte
-   libre.
+1. L'extension envoie le texte (sélection ou page entière, tronqué à 4000
+   caractères) **directement** à l'API Claude (Anthropic,
+   `api.anthropic.com`), authentifiée avec la clé API que vous avez
+   renseignée dans les réglages de l'extension.
+2. Un premier appel laisse le modèle chercher de vraies sources via l'outil
+   `web_search` intégré à l'API (jusqu'à 3 recherches). Un second appel
+   force l'utilisation d'un outil (`tool_choice`) sur un schéma JSON strict,
+   garantissant une sortie structurée et jamais du texte libre — le champ
+   `sources` ne peut alors contenir que des URLs réellement trouvées lors de
+   la recherche, jamais inventées.
 3. Une pop-up apparaît au niveau du curseur (ou en position par défaut sur
    mobile) avec le verdict : **statut** factuel, **sophismes rhétoriques**
-   détectés, **contexte** manquant, et une **requête de vérification**
-   neutre vers les sources officielles.
+   détectés, **contexte** manquant, et les **sources** trouvées, avec un
+   lien direct vers chacune.
+
+Le passage par deux appels et une recherche web réelle rend l'analyse un peu
+plus lente qu'un simple appel (comptez quelques secondes de plus) et peut
+entraîner un coût par recherche en plus du coût habituel par token — voir la
+tarification de l'outil `web_search` sur [platform.claude.com](https://platform.claude.com).
 
 **Plateformes prises en charge** : Chrome/Edge/Brave desktop, Firefox
 desktop, Firefox pour Android. Chrome pour Android et iOS, ainsi que tous
@@ -196,10 +208,11 @@ chemin n'existe pas sur ces plateformes, quelle que soit l'extension.
 
 ## Le moteur de qualification des faits
 
-Pour chaque texte analysé, l'appel à Claude (forcé via `tool_choice` sur
-l'outil `submit_reality_check`, défini dans `extension/prompts.js`) renvoie
-un JSON structuré sur quatre axes, sans aucun risque de sortie mal
-formée :
+Pour chaque texte analysé, un premier appel à Claude laisse le modèle
+chercher via l'outil `web_search`, puis un second appel force l'utilisation
+de l'outil `submit_reality_check` (défini dans `extension/prompts.js`), ce
+qui renvoie un JSON structuré sur quatre axes, sans aucun risque de sortie
+mal formée :
 
 ```json
 {
@@ -214,7 +227,12 @@ formée :
     "probleme_detecte": true,
     "explication": "Chiffre brut non ajusté à l'inflation."
   },
-  "verification": "INSEE indice des prix à la consommation"
+  "sources": [
+    {
+      "url": "https://www.insee.fr/fr/statistiques/2381375",
+      "description": "Indice des prix à la consommation, série longue."
+    }
+  ]
 }
 ```
 
@@ -224,9 +242,10 @@ formée :
   Esquive`. Liste vide si aucun n'est présent.
 - **`contexte`** : détection du cherry-picking et des variables omises
   (inflation, période, population...).
-- **`verification`** : requête de recherche neutre par mots-clés vers des
-  sources primaires officielles (INSEE, Légifrance, Cour des comptes,
-  Eurostat, rapports académiques...).
+- **`sources`** : 0 à 3 sources réelles (URL + description), trouvées par
+  le modèle via `web_search` parmi des sources primaires officielles
+  (INSEE, Légifrance, Cour des comptes, Eurostat, rapports académiques...).
+  Jamais une URL inventée : liste vide si aucune recherche n'aboutit.
 
 Dans la pop-up, le code couleur est strict : **rouge** pour un sophisme
 rhétorique flagrant, **jaune** pour un manque de contexte, **vert** pour un
