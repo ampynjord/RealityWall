@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <title>RealityWall — Réglages</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="rw-options">
+      <h1>RealityWall</h1>
+      <p class="rw-subtitle">
+        Configurez l'adresse du backend d'analyse. La clé API Anthropic
+        reste toujours côté serveur, jamais dans cette extension.
+      </p>
+
+      <form id="options-form">
+        <label for="backend-url">URL du backend</label>
+        <input
+          type="url"
+          id="backend-url"
+          name="backend-url"
+          placeholder="http://localhost:8000"
+          required
+        />
+        <button type="submit">Enregistrer</button>
+      </form>
+
+      <p id="status" class="rw-status" role="status"></p>
+
+      <section class="rw-help">
+        <h2>Utilisation</h2>
+        <ol>
+          <li>Démarrez le backend RealityWall (voir le README du projet).</li>
+          <li>Sélectionnez un texte sur n'importe quelle page web.</li>
+          <li>Clic droit → « Débunker avec RealityWall ».</li>
+        </ol>
+      </section>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

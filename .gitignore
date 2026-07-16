@@ -1,3 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Extension packagée
+*.zip
+
 # Logs
 logs
 *.log
