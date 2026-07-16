@@ -129,20 +129,26 @@ Toute la configuration passe par des variables d'environnement, lues depuis
 ## Télécharger l'extension déjà empaquetée
 
 Pas envie de cloner le dépôt ni d'installer Python juste pour l'extension ?
-Chaque push sur `main` publie automatiquement un `.zip` prêt à l'emploi sur
-la page des releases :
+Chaque push sur `main` publie automatiquement trois paquets prêts à l'emploi
+sur la page des releases — même contenu, un nom par plateforme :
 
 **[github.com/ampynjord/RealityWall/releases/latest](https://github.com/ampynjord/RealityWall/releases/latest)**
 
-Téléchargez `realitywall-extension-vX.Y.Z.zip`, décompressez-le dans un
-dossier, puis suivez les instructions de chargement ci-dessous (le dossier
-décompressé remplace le dossier `extension/` du dépôt). Le backend reste à
-installer séparément (voir [Démarrage rapide](#démarrage-rapide-moins-de-2-minutes)) :
+| Plateforme | Fichier | Suite |
+| --- | --- | --- |
+| Chrome / Edge / Brave (desktop) | `realitywall-extension-chrome-vX.Y.Z.zip` | Décompressez, puis « Charger l'extension non empaquetée » |
+| Firefox (desktop) | `realitywall-extension-firefox-desktop-vX.Y.Z.xpi` | Chargez directement via `about:debugging` |
+| Firefox pour Android | `realitywall-extension-firefox-android-vX.Y.Z.xpi` | Contenu identique au paquet Firefox desktop, via le pont de débogage distant |
+
+Voir la section [Charger l'extension dans le navigateur](#charger-lextension-dans-le-navigateur)
+ci-dessous pour le détail de chaque étape. Le backend reste à installer
+séparément (voir [Démarrage rapide](#démarrage-rapide-moins-de-2-minutes)) :
 l'extension seule ne fonctionne pas sans lui.
 
 Chaque exécution du pipeline CI (`.github/workflows/ci.yml`) publie aussi
-l'archive en tant qu'*artifact* du run, téléchargeable depuis l'onglet
-**Actions** du dépôt — pratique pour tester une pull request avant fusion.
+les trois paquets en tant qu'*artifacts* du run, téléchargeables depuis
+l'onglet **Actions** du dépôt — pratique pour tester une pull request avant
+fusion.
 
 ## Charger l'extension dans le navigateur
 
@@ -151,7 +157,9 @@ l'archive en tant qu'*artifact* du run, téléchargeable depuis l'onglet
 1. Ouvrez `chrome://extensions`.
 2. Activez le **Mode développeur** (coin supérieur droit).
 3. Cliquez sur **Charger l'extension non empaquetée**.
-4. Sélectionnez le dossier `extension/` de ce dépôt.
+4. Sélectionnez le dossier `extension/` de ce dépôt, ou le dossier obtenu
+   en décompressant `realitywall-extension-chrome-vX.Y.Z.zip` (voir
+   [Télécharger l'extension déjà empaquetée](#télécharger-lextension-déjà-empaquetée)).
 5. Sans sélection de texte, un clic sur l'icône RealityWall de la barre
    d'outils ouvre la page de réglages : vérifiez que l'URL du backend
    correspond bien à votre instance (`http://localhost:8000` par défaut).
@@ -160,7 +168,9 @@ l'archive en tant qu'*artifact* du run, téléchargeable depuis l'onglet
 
 1. Ouvrez `about:debugging#/runtime/this-firefox`.
 2. Cliquez sur **Charger un module complémentaire temporaire**.
-3. Sélectionnez le fichier `extension/manifest.json`.
+3. Sélectionnez soit le fichier `extension/manifest.json` de ce dépôt,
+   soit directement `realitywall-extension-firefox-desktop-vX.Y.Z.xpi`
+   téléchargé depuis les releases.
 
 Le chargement temporaire disparaît à la fermeture de Firefox ; à répéter à
 chaque session de développement.
@@ -180,7 +190,8 @@ publiée sur addons.mozilla.org nécessite un pont de débogage à distance :
    `about:debugging#/setup`, activez la connexion USB et sélectionnez
    l'appareil.
 4. Dans l'onglet de l'appareil connecté, chargez `extension/manifest.json`
-   comme module temporaire, exactement comme sur desktop.
+   (ou `realitywall-extension-firefox-android-vX.Y.Z.xpi`) comme module
+   temporaire, exactement comme sur desktop.
 5. Le backend RealityWall doit être joignable depuis le téléphone : soit
    sur le même réseau (remplacez `localhost` par l'IP de votre machine
    dans la page de réglages de l'extension), soit via un tunnel HTTPS.
