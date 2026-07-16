@@ -28,7 +28,7 @@ const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 const ANTHROPIC_MODEL = "claude-sonnet-5";
 const MAX_INPUT_CHARS = 4000;
-const MAX_SEARCH_TOKENS = 2048;
+const MAX_SEARCH_TOKENS = 4096;
 const MAX_OUTPUT_TOKENS = 1024;
 
 const STATUT_VALUES = ["Vrai", "Faux", "Incomplet", "Raccourci", "Hors-sujet"];
@@ -146,6 +146,37 @@ async function postMessages(apiKey, body) {
   return parsed;
 }
 
+const SERVER_TOOL_RESULT_TYPES = new Set([
+  "web_search_tool_result",
+  "web_fetch_tool_result",
+  "code_execution_tool_result",
+  "bash_code_execution_tool_result",
+  "text_editor_code_execution_tool_result",
+]);
+
+/**
+ * web_search applique un filtrage dynamique qui exécute du code en
+ * interne (code_execution) : un bloc server_tool_use doit toujours être
+ * suivi de son bloc *_tool_result. Si la réponse est tronquée par
+ * max_tokens en plein milieu d'un cycle de recherche, ce n'est pas
+ * garanti — on retire alors les appels d'outil sans résultat avant de les
+ * renvoyer, sous peine de 400 au tour suivant ("tool use ... was found
+ * without a corresponding tool_result block").
+ */
+function stripDanglingServerToolUse(content) {
+  if (!Array.isArray(content)) {
+    return content;
+  }
+  const resultIds = new Set(
+    content
+      .filter((block) => SERVER_TOOL_RESULT_TYPES.has(block?.type) && block.tool_use_id)
+      .map((block) => block.tool_use_id)
+  );
+  return content.filter(
+    (block) => !(block?.type === "server_tool_use" && !resultIds.has(block.id))
+  );
+}
+
 /**
  * Deux appels successifs : le premier laisse le modèle chercher librement
  * de vraies sources via web_search (tool_choice auto), le second force
@@ -164,7 +195,10 @@ async function callAnthropic(apiKey, text, sourceUrl) {
     messages,
   });
 
-  messages.push({ role: "assistant", content: searchBody.content });
+  messages.push({
+    role: "assistant",
+    content: stripDanglingServerToolUse(searchBody.content),
+  });
   messages.push({ role: "user", content: buildFinalizePrompt() });
 
   const finalBody = await postMessages(apiKey, {
