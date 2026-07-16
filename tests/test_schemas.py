@@ -72,6 +72,11 @@ def test_analyse_request_rejects_empty_text() -> None:
         AnalyseRequest(text="")
 
 
+def test_analyse_request_rejects_whitespace_only_text() -> None:
+    with pytest.raises(ValidationError):
+        AnalyseRequest(text="   \n\t  ")
+
+
 def test_analyse_request_accepts_optional_url() -> None:
     request = AnalyseRequest(text="Un texte à analyser.")
     assert request.url is None

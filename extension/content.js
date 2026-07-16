@@ -28,16 +28,28 @@ function removeOverlay() {
 
 function positionOverlay(overlay) {
   const viewportLeft = window.scrollX;
+  const viewportTop = window.scrollY;
   const viewportWidth = document.documentElement.clientWidth;
+  const viewportHeight = document.documentElement.clientHeight;
+
+  const rect = overlay.getBoundingClientRect();
+  const width = rect.width || OVERLAY_WIDTH;
+  const height = rect.height || 0;
 
   let left = lastClickPosition.x + MARGIN;
-  const maxLeft = viewportLeft + viewportWidth - OVERLAY_WIDTH - MARGIN;
+  const maxLeft = viewportLeft + viewportWidth - width - MARGIN;
   if (left > maxLeft) {
     left = Math.max(viewportLeft + MARGIN, maxLeft);
   }
 
+  let top = lastClickPosition.y + MARGIN;
+  const maxTop = viewportTop + viewportHeight - height - MARGIN;
+  if (top > maxTop) {
+    top = Math.max(viewportTop + MARGIN, maxTop);
+  }
+
   overlay.style.left = `${left}px`;
-  overlay.style.top = `${lastClickPosition.y + MARGIN}px`;
+  overlay.style.top = `${top}px`;
 }
 
 function createOverlayShell() {
@@ -45,7 +57,6 @@ function createOverlayShell() {
   const overlay = document.createElement("div");
   overlay.id = OVERLAY_ID;
   overlay.className = "reality-wall-overlay";
-  positionOverlay(overlay);
   document.body.appendChild(overlay);
   return overlay;
 }
@@ -75,6 +86,7 @@ function renderLoading() {
       <p>Analyse en cours…</p>
     </div>
   `;
+  positionOverlay(overlay);
   bindClose(overlay);
 }
 
@@ -164,6 +176,7 @@ function renderResult(data) {
     </div>
   `;
 
+  positionOverlay(overlay);
   bindClose(overlay);
 
   const copyButton = overlay.querySelector(".rw-copy");
@@ -197,6 +210,7 @@ function renderError(message) {
       </p>
     </div>
   `;
+  positionOverlay(overlay);
   bindClose(overlay);
 }
 

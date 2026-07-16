@@ -2,6 +2,7 @@
 
 .reality-wall-overlay {
   all: initial;
+  display: block;
   position: absolute;
   z-index: 2147483647;
   width: 380px;

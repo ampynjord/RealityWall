@@ -60,6 +60,12 @@ async def test_analyze_endpoint_rejects_empty_text() -> None:
     assert response.status_code == 422
 
 
+async def test_analyze_endpoint_rejects_whitespace_only_text() -> None:
+    async with await _client() as client:
+        response = await client.post("/analyze", json={"text": "   \n\t  "})
+    assert response.status_code == 422
+
+
 async def test_analyze_endpoint_rejects_missing_text_field() -> None:
     async with await _client() as client:
         response = await client.post("/analyze", json={})

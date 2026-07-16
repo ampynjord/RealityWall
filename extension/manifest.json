@@ -3,7 +3,6 @@
   "name": "RealityWall",
   "version": "1.0.0",
   "description": "Sélectionnez un texte, clic droit, débunkez. Un mur de faits infranchissable face à la mauvaise foi numérique.",
-  "default_locale": "fr",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

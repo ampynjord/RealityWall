@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 Statut = Literal["Vrai", "Faux", "Incomplet", "Raccourci", "Hors-sujet"]
 
@@ -35,6 +35,13 @@ class AnalyseRequest(BaseModel):
 
     text: str = Field(min_length=1, max_length=8000)
     url: str | None = None
+
+    @field_validator("text")
+    @classmethod
+    def text_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Le texte ne peut pas être composé uniquement d'espaces.")
+        return value
 
 
 class RealityCheckResult(BaseModel):
