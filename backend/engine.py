@@ -44,18 +44,21 @@ class RealityWallEngine:
         if len(cleaned) > max_chars:
             cleaned = cleaned[:max_chars]
 
+        create_kwargs: dict[str, Any] = {
+            "model": self._settings.anthropic_model,
+            "max_tokens": self._settings.max_output_tokens,
+            "system": SYSTEM_PROMPT,
+            "tools": [REALITY_CHECK_TOOL],
+            "tool_choice": {"type": "tool", "name": TOOL_NAME},
+            "messages": [
+                {"role": "user", "content": build_user_prompt(cleaned, source_url)}
+            ],
+        }
+        if self._settings.anthropic_temperature is not None:
+            create_kwargs["temperature"] = self._settings.anthropic_temperature
+
         try:
-            response = await self._client.messages.create(
-                model=self._settings.anthropic_model,
-                max_tokens=self._settings.max_output_tokens,
-                temperature=0.0,
-                system=SYSTEM_PROMPT,
-                tools=[REALITY_CHECK_TOOL],
-                tool_choice={"type": "tool", "name": TOOL_NAME},
-                messages=[
-                    {"role": "user", "content": build_user_prompt(cleaned, source_url)}
-                ],
-            )
+            response = await self._client.messages.create(**create_kwargs)
         except anthropic.APIError as exc:
             logger.exception("Erreur API Anthropic")
             raise RealityWallError(f"Erreur API Anthropic : {exc}") from exc

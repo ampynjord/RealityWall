@@ -23,6 +23,12 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-5"
+    # `None` = paramètre omis. Certains modèles récents rejettent
+    # explicitement `temperature` (déprécié côté API) ; le déterminisme de
+    # la sortie est de toute façon garanti par le tool_choice forcé et le
+    # schéma JSON strict, pas par la température. Réglable pour les
+    # modèles qui le supportent encore.
+    anthropic_temperature: float | None = None
 
     host: str = "0.0.0.0"
     port: int = 8000

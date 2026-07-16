@@ -32,9 +32,9 @@ primaires officielles permettant de vérifier par soi-même.
 2. Clic droit → **Débunker avec RealityWall**.
 3. L'extension envoie le texte sélectionné au backend local que vous avez
    démarré sur votre machine.
-4. Le backend interroge l'API Claude (Anthropic) avec une température de
-   `0.0` et un appel d'outil forcé, garantissant une sortie JSON strictement
-   structurée et reproductible.
+4. Le backend interroge l'API Claude (Anthropic) avec un appel d'outil
+   forcé (`tool_choice`) sur un schéma JSON strict, garantissant une sortie
+   structurée et jamais du texte libre.
 5. Une pop-up apparaît au niveau du curseur avec le verdict : **statut**
    factuel, **sophismes rhétoriques** détectés, **contexte** manquant, et
    une **requête de vérification** neutre vers les sources officielles.
@@ -47,7 +47,7 @@ RealityWall/
 │   ├── config.py            Paramètres (variables d'environnement)
 │   ├── prompts.py           Prompt système + schéma d'outil JSON strict
 │   ├── schemas.py           Modèles Pydantic (contrat de données)
-│   ├── engine.py            Appel Claude, temperature=0.0, tool_choice forcé
+│   ├── engine.py            Appel Claude, tool_choice forcé, schéma JSON strict
 │   ├── main.py               Endpoints FastAPI /analyze et /health
 │   └── requirements*.txt
 ├── extension/              Extension navigateur Manifest V3
@@ -100,6 +100,7 @@ Toute la configuration passe par des variables d'environnement, lues depuis
 | --------------------- | ---------------------------------------- | ---------------------------------------------- |
 | `ANTHROPIC_API_KEY`   | *(vide)*                                 | Clé API Anthropic, obligatoire.                |
 | `ANTHROPIC_MODEL`     | `claude-sonnet-5`                       | Modèle Claude utilisé pour l'analyse.          |
+| `ANTHROPIC_TEMPERATURE` | *(omis)*                               | Optionnel : certains modèles rejettent ce paramètre (déprécié côté API). Le déterminisme vient du `tool_choice` forcé, pas de la température. |
 | `HOST`                | `0.0.0.0`                                | Interface d'écoute d'uvicorn.                  |
 | `PORT`                | `8000`                                   | Port d'écoute d'uvicorn.                       |
 | `CORS_ORIGIN_REGEX`   | origines `chrome-extension://` / `moz-extension://` / `localhost` | Regex des origines HTTP autorisées. |

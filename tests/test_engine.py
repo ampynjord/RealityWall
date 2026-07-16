@@ -19,8 +19,17 @@ async def test_analyze_returns_validated_result(valid_tool_output: dict) -> None
     assert isinstance(result, RealityCheckResult)
     assert result.statut == "Raccourci"
     call_kwargs = fake_client.messages.calls[0]
-    assert call_kwargs["temperature"] == 0.0
+    assert "temperature" not in call_kwargs
     assert call_kwargs["tool_choice"] == {"type": "tool", "name": "submit_reality_check"}
+
+
+async def test_analyze_forwards_temperature_when_configured(valid_tool_output: dict) -> None:
+    engine, fake_client = make_engine([valid_tool_output], anthropic_temperature=0.0)
+
+    await engine.analyze("Un commentaire quelconque.")
+
+    call_kwargs = fake_client.messages.calls[0]
+    assert call_kwargs["temperature"] == 0.0
 
 
 async def test_analyze_rejects_empty_text() -> None:
