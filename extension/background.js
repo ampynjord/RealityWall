@@ -16,7 +16,7 @@
 const api = typeof browser !== "undefined" ? browser : chrome;
 
 const MENU_ID = "reality-wall-debunk";
-const DEFAULT_BACKEND_URL = "http://localhost:8000";
+const DEFAULT_BACKEND_URL = "https://realitywall.ampynjord.bzh";
 
 api.runtime.onInstalled.addListener(() => {
   api.contextMenus.create({

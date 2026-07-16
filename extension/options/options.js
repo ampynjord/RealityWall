@@ -5,7 +5,7 @@
 
 const api = typeof browser !== "undefined" ? browser : chrome;
 
-const DEFAULT_BACKEND_URL = "http://localhost:8000";
+const DEFAULT_BACKEND_URL = "https://realitywall.ampynjord.bzh";
 
 const form = document.getElementById("options-form");
 const urlInput = document.getElementById("backend-url");

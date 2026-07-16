@@ -17,12 +17,22 @@ propos. Il agit comme un compilateur logique froid : il détecte des erreurs
 factuelles et des sophismes de mauvaise foi, et pointe vers les sources
 primaires officielles permettant de vérifier par soi-même.
 
+Un backend est déployé en production sur `https://realitywall.ampynjord.bzh`
+et configuré par défaut dans l'extension : pour un usage normal, **il suffit
+d'installer l'extension**, aucune installation locale n'est nécessaire (voir
+[Télécharger l'extension déjà empaquetée](#télécharger-lextension-déjà-empaquetée)).
+Les sections [Démarrage rapide](#démarrage-rapide-moins-de-2-minutes) et
+[Déploiement en production](#déploiement-en-production-vps--docker--traefik)
+ne concernent que le développement ou l'auto-hébergement d'une instance
+personnelle du backend.
+
 ## Sommaire
 
 - [Fonctionnement](#fonctionnement)
 - [Architecture](#architecture)
 - [Démarrage rapide (moins de 2 minutes)](#démarrage-rapide-moins-de-2-minutes)
 - [Configuration du backend](#configuration-du-backend)
+- [Déploiement en production (VPS + Docker + Traefik)](#déploiement-en-production-vps--docker--traefik)
 - [Télécharger l'extension déjà empaquetée](#télécharger-lextension-déjà-empaquetée)
 - [Charger l'extension dans le navigateur](#charger-lextension-dans-le-navigateur)
 - [Lancer les tests](#lancer-les-tests)
@@ -43,8 +53,9 @@ Deux déclencheurs équivalents, selon ce que votre navigateur permet :
 
 Dans les deux cas, la suite est identique :
 
-1. L'extension envoie le texte sélectionné au backend local que vous avez
-   démarré sur votre machine.
+1. L'extension envoie le texte sélectionné au backend configuré dans ses
+   réglages (`https://realitywall.ampynjord.bzh` par défaut ; une instance
+   locale ou auto-hébergée reste possible, voir plus bas).
 2. Le backend interroge l'API Claude (Anthropic) avec un appel d'outil
    forcé (`tool_choice`) sur un schéma JSON strict, garantissant une sortie
    structurée et jamais du texte libre.
@@ -79,6 +90,9 @@ RealityWall/
 │   └── icons/
 ├── tests/                  Suite de tests pytest
 ├── scripts/generate_icons.py  Génération des icônes PNG (sans dépendance)
+├── .github/workflows/ci.yml  Tests + empaquetage extension + déploiement VPS
+├── backend/Dockerfile
+├── docker-compose.yml      Déploiement backend derrière Traefik (VPS)
 └── Makefile
 ```
 
@@ -87,6 +101,10 @@ reste exclusivement côté serveur. L'extension, elle, ne connaît que l'URL
 du backend (configurable via sa page de réglages).
 
 ## Démarrage rapide (moins de 2 minutes)
+
+Cette section sert à développer ou faire tourner votre propre instance du
+backend en local — **pas nécessaire pour utiliser l'extension au
+quotidien**, qui pointe par défaut sur l'instance de production.
 
 Prérequis : Python 3.11+, un navigateur Chrome ou Firefox, et une clé API
 Anthropic ([console.anthropic.com](https://console.anthropic.com/)).
@@ -125,6 +143,74 @@ Toute la configuration passe par des variables d'environnement, lues depuis
 | `PORT`                | `8000`                                   | Port d'écoute d'uvicorn.                       |
 | `CORS_ORIGIN_REGEX`   | origines `chrome-extension://` / `moz-extension://` / `localhost` | Regex des origines HTTP autorisées. |
 | `MAX_INPUT_CHARS`     | `4000`                                   | Troncature du texte envoyé au modèle.          |
+
+## Déploiement en production (VPS + Docker + Traefik)
+
+Le backend de production tourne en conteneur Docker derrière un Traefik déjà
+en place sur le VPS, avec HTTPS automatique. Le déploiement est ensuite
+automatisé : chaque push sur `main` qui passe les tests met à jour
+l'instance en production via le job `deploy` de la CI.
+
+### Mise en place initiale (une seule fois)
+
+1. **DNS** : créez un enregistrement (A ou AAAA) pointant
+   `realitywall.ampynjord.bzh` vers l'IP du VPS, chez votre registrar (OVH).
+2. **Sur le VPS**, clonez le dépôt à l'endroit de votre choix et préparez `.env` :
+   ```bash
+   git clone https://github.com/ampynjord/RealityWall.git
+   cd RealityWall
+   cp .env.example .env
+   $EDITOR .env   # ANTHROPIC_API_KEY=sk-ant-...
+   ```
+3. **Premier démarrage manuel**, pour vérifier que Traefik route correctement
+   avant d'activer le déploiement automatique :
+   ```bash
+   docker compose up -d --build
+   docker compose logs -f
+   ```
+   Le réseau Docker externe utilisé par Traefik doit s'appeler `traefik` et
+   le certresolver `letsencrypt` par défaut ; sinon, adaptez `TRAEFIK_NETWORK`
+   et `TRAEFIK_CERTRESOLVER` dans `.env` (voir `docker-compose.yml`, valeurs
+   interpolées depuis l'environnement, avec ces deux noms comme défauts).
+4. Vérifiez `https://realitywall.ampynjord.bzh/health` → `{"status":"ok"}`.
+
+### Activer le déploiement automatique depuis GitHub Actions
+
+Dans les réglages du dépôt GitHub (**Settings → Secrets and variables →
+Actions**), ajoutez ces secrets :
+
+| Secret            | Valeur                                              |
+| ------------------ | ---------------------------------------------------- |
+| `DEPLOY_SSH_HOST`  | `ampynjord.bzh`                                      |
+| `DEPLOY_SSH_PORT`  | `2222`                                               |
+| `DEPLOY_SSH_USER`  | `debian`                                             |
+| `DEPLOY_SSH_KEY`   | Clé privée SSH (format PEM) autorisée sur le VPS pour cet utilisateur |
+| `DEPLOY_SSH_KNOWN_HOSTS` | Empreinte(s) de l'hôte, voir ci-dessous — **pas** générée par la CI, pour éviter tout risque de MITM au moment du déploiement |
+| `DEPLOY_PATH`      | Chemin absolu du clone sur le VPS, ex. `/home/debian/RealityWall` |
+
+Pour `DEPLOY_SSH_KNOWN_HOSTS`, générez l'empreinte **depuis une machine de
+confiance** (votre poste, pas la CI) et collez la sortie telle quelle dans
+le secret :
+
+```bash
+ssh-keyscan -p 2222 ampynjord.bzh
+```
+
+Le job `deploy` du workflow (`.github/workflows/ci.yml`) se connecte en SSH
+et exécute `git fetch && git reset --hard origin/main && docker compose up
+-d --build` dans ce dossier — **ce dossier ne doit jamais être modifié à la
+main sur le VPS**, il est écrasé à chaque déploiement. La clé API Anthropic,
+elle, ne transite jamais par GitHub Actions : elle reste uniquement dans le
+`.env` local au VPS.
+
+### Mettre à jour manuellement (sans passer par la CI)
+
+```bash
+ssh -p 2222 debian@ampynjord.bzh
+cd /chemin/vers/RealityWall
+git pull
+docker compose up -d --build
+```
 
 ## Télécharger l'extension déjà empaquetée
 
@@ -265,7 +351,15 @@ fait validé.
   `moz-extension://` et `localhost` par défaut (voir `CORS_ORIGIN_REGEX`).
 - Si vous déployez le backend sur une machine distante, la page de réglages
   de l'extension demande explicitement la permission d'hôte correspondante
-  avant d'enregistrer une URL non locale (API `chrome.permissions`).
+  avant d'enregistrer une URL non locale (API `chrome.permissions`) — sauf
+  pour `realitywall.ampynjord.bzh`, déjà déclaré en dur dans
+  `host_permissions` puisque c'est l'instance de production par défaut.
+- Le déploiement automatisé (job `deploy` de la CI) ne connaît que des
+  identifiants SSH stockés en secrets GitHub Actions ; la clé API Anthropic
+  reste exclusivement dans le `.env` du VPS et ne transite jamais par
+  GitHub. La clé privée SSH utilisée doit être dédiée à ce déploiement
+  (pas votre clé personnelle) et n'autoriser que les actions nécessaires
+  sur le VPS.
 
 ## Dépannage
 
@@ -277,3 +371,8 @@ fait validé.
   dans `ANTHROPIC_MODEL` est disponible pour votre compte.
 - **Le menu contextuel n'apparaît pas** : rechargez l'extension depuis
   `chrome://extensions` après toute modification du code.
+- **L'instance de production ne reflète pas le dernier push sur `main`** :
+  vérifiez le job `deploy` dans l'onglet Actions du dépôt. Les causes les
+  plus fréquentes sont des secrets SSH manquants/expirés ou une erreur
+  Traefik (réseau/certresolver) — voir
+  [Déploiement en production](#déploiement-en-production-vps--docker--traefik).
