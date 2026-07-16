@@ -106,3 +106,32 @@ jobs:
               --title "RealityWall extension v${VERSION}" \
               --notes "$NOTES"
           fi
+
+  deploy:
+    name: Déployer le backend sur le VPS
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configurer l'accès SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: git pull + docker compose up -d --build sur le VPS
+        env:
+          SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+          SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
+            "cd '$DEPLOY_PATH' && git fetch origin main && git reset --hard origin/main && docker compose up -d --build"
