@@ -18,15 +18,10 @@
   },
   "background": {
     "service_worker": "background.js",
-    "scripts": ["background.js"]
+    "scripts": ["prompts.js", "background.js"]
   },
   "permissions": ["contextMenus", "storage", "activeTab", "scripting"],
-  "host_permissions": [
-    "https://realitywall.ampynjord.bzh/*",
-    "http://localhost:8000/*",
-    "http://127.0.0.1:8000/*"
-  ],
-  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "host_permissions": ["https://api.anthropic.com/*"],
   "content_scripts": [
     {
       "matches": ["<all_urls>"],

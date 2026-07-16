@@ -42,17 +42,26 @@ label {
   color: #334155;
 }
 
-input[type="url"] {
+input[type="password"],
+input[type="text"] {
+  flex: 1;
   padding: 9px 12px;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   font-size: 14px;
   color: #0f172a;
+  font-family: monospace;
 }
 
-input[type="url"]:focus {
+input[type="password"]:focus,
+input[type="text"]:focus {
   outline: 2px solid #0f172a;
   outline-offset: 1px;
+}
+
+.rw-key-row {
+  display: flex;
+  gap: 8px;
 }
 
 button {
@@ -70,6 +79,24 @@ button {
 
 button:hover {
   background: #1e293b;
+}
+
+button.rw-secondary {
+  align-self: stretch;
+  margin-top: 0;
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+button.rw-secondary:hover {
+  background: #cbd5e1;
+}
+
+code {
+  font-family: monospace;
+  background: #f1f5f9;
+  padding: 1px 4px;
+  border-radius: 4px;
 }
 
 .rw-status {
