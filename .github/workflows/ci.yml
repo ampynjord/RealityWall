@@ -111,12 +111,25 @@ jobs:
           fi
 
   deploy:
-    name: Déployer le backend sur le VPS
+    name: Déployer le backend sur le VPS (optionnel)
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
+      - name: Vérifier si le déploiement VPS est configuré
+        id: check
+        env:
+          SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+        run: |
+          if [ -n "$SSH_HOST" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Déploiement VPS ignoré : secrets DEPLOY_SSH_* non configurés. Le backend est optionnel depuis le passage en BYOK (voir README), l'extension ne dépend pas de ce déploiement."
+          fi
+
       - name: Configurer l'accès SSH
+        if: steps.check.outputs.configured == 'true'
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
@@ -129,6 +142,7 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
 
       - name: git pull + docker compose up -d --build sur le VPS
+        if: steps.check.outputs.configured == 'true'
         env:
           SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
           SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}

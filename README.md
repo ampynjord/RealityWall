@@ -360,9 +360,10 @@ dossier ne doit jamais être modifié à la main sur le VPS, il est écrasé à
 chaque déploiement. La clé API Anthropic ne transite jamais par GitHub
 Actions : elle reste uniquement dans le `.env` local au VPS.
 
-Sans ces secrets configurés, le job `deploy` échoue simplement à chaque
-run — cela n'affecte ni les tests, ni l'empaquetage et la publication de
-l'extension, qui restent indépendants.
+Sans ces secrets configurés, le job `deploy` se contente d'afficher un
+message et de s'arrêter proprement (aucune tentative de connexion, aucun
+échec affiché) — cela n'affecte ni les tests, ni l'empaquetage et la
+publication de l'extension, qui restent indépendants.
 
 ## Lancer les tests du backend
 
