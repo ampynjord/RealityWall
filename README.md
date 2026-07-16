@@ -2,12 +2,12 @@
 
 Un mur de faits infranchissable face à la mauvaise foi numérique.
 
-RealityWall est une extension de navigateur (Chrome / Firefox, Manifest V3)
-qui permet de sélectionner n'importe quel texte sur le web (commentaire de
-réseau social, article, message de chat), de faire un clic droit sur
-**« Débunker avec RealityWall »**, et d'obtenir instantanément une analyse
-factuelle et rhétorique neutre, affichée dans une pop-up sobre au niveau du
-curseur.
+RealityWall est une extension de navigateur (Chrome et Firefox, desktop et
+Android, Manifest V3) qui permet de sélectionner n'importe quel texte sur
+le web (commentaire de réseau social, article, message de chat), de faire
+un clic droit sur **« Débunker avec RealityWall »** (ou de toucher l'icône
+de l'extension sur mobile), et d'obtenir instantanément une analyse
+factuelle et rhétorique neutre, affichée dans une pop-up sobre.
 
 Le système ne juge jamais moralement, politiquement ou idéologiquement un
 propos. Il agit comme un compilateur logique froid : il détecte des erreurs
@@ -28,16 +28,32 @@ primaires officielles permettant de vérifier par soi-même.
 
 ## Fonctionnement
 
-1. Vous sélectionnez un texte sur une page web.
-2. Clic droit → **Débunker avec RealityWall**.
-3. L'extension envoie le texte sélectionné au backend local que vous avez
+Deux déclencheurs équivalents, selon ce que votre navigateur permet :
+
+- **Desktop (Chrome, Firefox)** : sélectionnez un texte, clic droit →
+  **Débunker avec RealityWall**.
+- **Partout, y compris Firefox pour Android** (qui ne supporte pas les
+  menus contextuels) : sélectionnez un texte puis touchez/cliquez l'icône
+  RealityWall de la barre d'outils — elle analyse la sélection en cours.
+  Sans sélection, un clic sur l'icône ouvre simplement la page de réglages.
+
+Dans les deux cas, la suite est identique :
+
+1. L'extension envoie le texte sélectionné au backend local que vous avez
    démarré sur votre machine.
-4. Le backend interroge l'API Claude (Anthropic) avec un appel d'outil
+2. Le backend interroge l'API Claude (Anthropic) avec un appel d'outil
    forcé (`tool_choice`) sur un schéma JSON strict, garantissant une sortie
    structurée et jamais du texte libre.
-5. Une pop-up apparaît au niveau du curseur avec le verdict : **statut**
-   factuel, **sophismes rhétoriques** détectés, **contexte** manquant, et
-   une **requête de vérification** neutre vers les sources officielles.
+3. Une pop-up apparaît au niveau du curseur (ou en position par défaut sur
+   mobile) avec le verdict : **statut** factuel, **sophismes rhétoriques**
+   détectés, **contexte** manquant, et une **requête de vérification**
+   neutre vers les sources officielles.
+
+**Plateformes prises en charge** : Chrome/Edge/Brave desktop, Firefox
+desktop, Firefox pour Android. Chrome pour Android et iOS, ainsi que tous
+les navigateurs basés sur WebKit/Blink mobile, ne supportent aucune
+extension tierce (limite des navigateurs eux-mêmes, pas de contournement
+possible côté extension).
 
 ## Architecture
 
@@ -50,9 +66,9 @@ RealityWall/
 │   ├── engine.py            Appel Claude, tool_choice forcé, schéma JSON strict
 │   ├── main.py               Endpoints FastAPI /analyze et /health
 │   └── requirements*.txt
-├── extension/              Extension navigateur Manifest V3
+├── extension/              Extension navigateur Manifest V3 (Chrome + Firefox)
 │   ├── manifest.json
-│   ├── background.js        Menu contextuel + appel au backend
+│   ├── background.js        Menu contextuel + icône barre d'outils + backend
 │   ├── content.js            Overlay injecté sur la page (pop-up)
 │   ├── content.css
 │   ├── options/               Page de réglages (URL du backend)
@@ -108,21 +124,47 @@ Toute la configuration passe par des variables d'environnement, lues depuis
 
 ## Charger l'extension dans le navigateur
 
-### Chrome / Edge / Brave (Chromium)
+### Chrome / Edge / Brave (Chromium, desktop)
 
 1. Ouvrez `chrome://extensions`.
 2. Activez le **Mode développeur** (coin supérieur droit).
 3. Cliquez sur **Charger l'extension non empaquetée**.
 4. Sélectionnez le dossier `extension/` de ce dépôt.
-5. Ouvrez la page de réglages de l'extension (clic sur son icône dans la
-   barre d'outils) et vérifiez que l'URL du backend correspond bien à votre
-   instance (`http://localhost:8000` par défaut).
+5. Sans sélection de texte, un clic sur l'icône RealityWall de la barre
+   d'outils ouvre la page de réglages : vérifiez que l'URL du backend
+   correspond bien à votre instance (`http://localhost:8000` par défaut).
 
-### Firefox
+### Firefox (desktop)
 
 1. Ouvrez `about:debugging#/runtime/this-firefox`.
 2. Cliquez sur **Charger un module complémentaire temporaire**.
 3. Sélectionnez le fichier `extension/manifest.json`.
+
+Le chargement temporaire disparaît à la fermeture de Firefox ; à répéter à
+chaque session de développement.
+
+### Firefox pour Android
+
+Firefox Android ne dispose pas de menu contextuel : l'analyse se déclenche
+en touchant l'icône de l'extension après avoir sélectionné du texte (voir
+[Fonctionnement](#fonctionnement)). Le chargement d'une extension non
+publiée sur addons.mozilla.org nécessite un pont de débogage à distance :
+
+1. Installez **Firefox Nightly pour Android** sur votre appareil (seul
+   canal autorisant le débogage à distance des extensions).
+2. Sur cet appareil, activez le débogage USB dans les réglages de Firefox
+   Nightly (`about:config` → `devtools.debugger.remote-enabled` à `true`).
+3. Connectez l'appareil à un ordinateur exécutant Firefox desktop, ouvrez
+   `about:debugging#/setup`, activez la connexion USB et sélectionnez
+   l'appareil.
+4. Dans l'onglet de l'appareil connecté, chargez `extension/manifest.json`
+   comme module temporaire, exactement comme sur desktop.
+5. Le backend RealityWall doit être joignable depuis le téléphone : soit
+   sur le même réseau (remplacez `localhost` par l'IP de votre machine
+   dans la page de réglages de l'extension), soit via un tunnel HTTPS.
+
+Chrome pour Android et iOS ne supportent aucune extension tierce : ce
+chemin n'existe pas sur ces plateformes, quelle que soit l'extension.
 
 ## Lancer les tests
 

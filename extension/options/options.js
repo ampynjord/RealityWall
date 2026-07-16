@@ -3,6 +3,8 @@
  * demande de permission d'hôte optionnelle si l'URL n'est pas locale.
  */
 
+const api = typeof browser !== "undefined" ? browser : chrome;
+
 const DEFAULT_BACKEND_URL = "http://localhost:8000";
 
 const form = document.getElementById("options-form");
@@ -21,7 +23,7 @@ function originPatternFor(url) {
 }
 
 async function loadOptions() {
-  const { backendUrl } = await chrome.storage.sync.get({
+  const { backendUrl } = await api.storage.sync.get({
     backendUrl: DEFAULT_BACKEND_URL,
   });
   urlInput.value = backendUrl;
@@ -49,14 +51,14 @@ form.addEventListener("submit", async (event) => {
 
   if (!isLocal) {
     const origin = originPatternFor(value);
-    const granted = await chrome.permissions.request({ origins: [origin] });
+    const granted = await api.permissions.request({ origins: [origin] });
     if (!granted) {
       setStatus("Permission refusée pour cette origine, réglage non enregistré.", true);
       return;
     }
   }
 
-  await chrome.storage.sync.set({ backendUrl: value });
+  await api.storage.sync.set({ backendUrl: value });
   setStatus("Réglages enregistrés.");
 });
 

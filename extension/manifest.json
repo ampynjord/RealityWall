@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "RealityWall",
   "version": "1.0.0",
-  "description": "Sélectionnez un texte, clic droit, débunkez. Un mur de faits infranchissable face à la mauvaise foi numérique.",
+  "description": "Sélectionnez un texte, clic droit (ou icône), débunkez. Un mur de faits infranchissable face à la mauvaise foi numérique.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -14,13 +14,13 @@
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     },
-    "default_title": "RealityWall — Réglages"
+    "default_title": "RealityWall — analyse la sélection en cours (ou ouvre les réglages)"
   },
   "background": {
     "service_worker": "background.js",
-    "type": "module"
+    "scripts": ["background.js"]
   },
-  "permissions": ["contextMenus", "storage", "activeTab"],
+  "permissions": ["contextMenus", "storage", "activeTab", "scripting"],
   "host_permissions": [
     "http://localhost:8000/*",
     "http://127.0.0.1:8000/*"
@@ -37,5 +37,14 @@
   "options_ui": {
     "page": "options/options.html",
     "open_in_tab": true
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "realitywall@ampynjord.github.io",
+      "strict_min_version": "115.0"
+    },
+    "gecko_android": {
+      "strict_min_version": "115.0"
+    }
   }
 }

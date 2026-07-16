@@ -5,6 +5,8 @@
  * externe ni framework : DOM natif et CSS scoping par préfixe `rw-`.
  */
 
+const api = typeof browser !== "undefined" ? browser : chrome;
+
 const OVERLAY_ID = "reality-wall-overlay";
 const OVERLAY_WIDTH = 380;
 const MARGIN = 12;
@@ -214,7 +216,7 @@ function renderError(message) {
   bindClose(overlay);
 }
 
-chrome.runtime.onMessage.addListener((message) => {
+api.runtime.onMessage.addListener((message) => {
   if (!message || typeof message.type !== "string") {
     return;
   }
