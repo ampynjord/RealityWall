@@ -185,7 +185,16 @@ Actions**), ajoutez ces secrets :
 | `DEPLOY_SSH_PORT`  | `2222`                                               |
 | `DEPLOY_SSH_USER`  | `debian`                                             |
 | `DEPLOY_SSH_KEY`   | Clé privée SSH (format PEM) autorisée sur le VPS pour cet utilisateur |
+| `DEPLOY_SSH_KNOWN_HOSTS` | Empreinte(s) de l'hôte, voir ci-dessous — **pas** générée par la CI, pour éviter tout risque de MITM au moment du déploiement |
 | `DEPLOY_PATH`      | Chemin absolu du clone sur le VPS, ex. `/home/debian/RealityWall` |
+
+Pour `DEPLOY_SSH_KNOWN_HOSTS`, générez l'empreinte **depuis une machine de
+confiance** (votre poste, pas la CI) et collez la sortie telle quelle dans
+le secret :
+
+```bash
+ssh-keyscan -p 2222 ampynjord.bzh
+```
 
 Le job `deploy` du workflow (`.github/workflows/ci.yml`) se connecte en SSH
 et exécute `git fetch && git reset --hard origin/main && docker compose up
