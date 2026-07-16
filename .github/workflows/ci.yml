@@ -46,17 +46,25 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Créer l'archive de l'extension
+      - name: Créer les archives de l'extension (une par plateforme)
         run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
           mkdir -p dist
-          cd extension
-          zip -r "../dist/realitywall-extension-v${{ steps.version.outputs.version }}.zip" . -x ".*"
+          (cd extension && zip -rq "../dist/realitywall-extension-chrome-v${VERSION}.zip" . -x ".*")
+          cp "dist/realitywall-extension-chrome-v${VERSION}.zip" \
+             "dist/realitywall-extension-firefox-desktop-v${VERSION}.xpi"
+          cp "dist/realitywall-extension-chrome-v${VERSION}.zip" \
+             "dist/realitywall-extension-firefox-android-v${VERSION}.xpi"
+          ls -la dist/
 
-      - name: Publier l'archive comme artifact du run
+      - name: Publier les archives comme artifacts du run
         uses: actions/upload-artifact@v4
         with:
           name: realitywall-extension
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*.xpi
           retention-days: 90
 
   release:
@@ -79,12 +87,22 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.package.outputs.version }}
         run: |
+          set -euo pipefail
           TAG="extension-v${VERSION}"
+          NOTES="Extension RealityWall prête à télécharger et installer, un package par plateforme (contenu identique, seul le nom change) :
+
+          - **Chrome / Edge / Brave** : \`realitywall-extension-chrome-v${VERSION}.zip\` — décompressez puis « Charger l'extension non empaquetée ».
+          - **Firefox desktop** : \`realitywall-extension-firefox-desktop-v${VERSION}.xpi\` — chargez directement via about:debugging → « Charger un module complémentaire temporaire ».
+          - **Firefox Android** : \`realitywall-extension-firefox-android-v${VERSION}.xpi\` — contenu identique au paquet Firefox desktop, à charger via le pont de débogage distant (voir le README).
+
+          Voir le README pour les instructions détaillées."
+
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/*.zip --repo "$GITHUB_REPOSITORY" --clobber
+            gh release upload "$TAG" dist/*.zip dist/*.xpi --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes "$NOTES"
           else
-            gh release create "$TAG" dist/*.zip \
+            gh release create "$TAG" dist/*.zip dist/*.xpi \
               --repo "$GITHUB_REPOSITORY" \
               --title "RealityWall extension v${VERSION}" \
-              --notes "Extension RealityWall prête à télécharger et installer (Chrome, Firefox desktop et Firefox Android). Téléchargez le .zip, décompressez-le, puis suivez les instructions \"Charger l'extension\" du README."
+              --notes "$NOTES"
           fi
