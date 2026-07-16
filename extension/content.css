@@ -1,0 +1,225 @@
+/* Overlay RealityWall — styles scopés, sans dépendance externe. */
+
+.reality-wall-overlay {
+  all: initial;
+  position: absolute;
+  z-index: 2147483647;
+  width: 380px;
+  max-width: calc(100vw - 24px);
+  max-height: 70vh;
+  overflow-y: auto;
+  box-sizing: border-box;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #0f172a;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.22), 0 2px 8px rgba(15, 23, 42, 0.12);
+}
+
+.reality-wall-overlay * {
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.reality-wall-overlay .rw-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #0f172a;
+  border-radius: 10px 10px 0 0;
+}
+
+.reality-wall-overlay .rw-title {
+  color: #f8fafc;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.reality-wall-overlay .rw-close {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: #cbd5e1;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.reality-wall-overlay .rw-close:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.reality-wall-overlay .rw-body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.reality-wall-overlay .rw-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reality-wall-overlay .rw-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+}
+
+.reality-wall-overlay .rw-badge {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.reality-wall-overlay .rw-badge-green {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.reality-wall-overlay .rw-badge-red {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.reality-wall-overlay .rw-badge-yellow {
+  background: #fef9c3;
+  color: #854d0e;
+}
+
+.reality-wall-overlay .rw-badge-neutral {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.reality-wall-overlay .rw-empty {
+  margin: 0;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.reality-wall-overlay .rw-rhet-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.reality-wall-overlay .rw-rhet-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-left: 3px solid #ef4444;
+  background: #fef2f2;
+  border-radius: 0 6px 6px 0;
+}
+
+.reality-wall-overlay .rw-rhet-item p {
+  margin: 0;
+  color: #1e293b;
+}
+
+.reality-wall-overlay .rw-context {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-left: 3px solid #eab308;
+  background: #fefce8;
+  border-radius: 0 6px 6px 0;
+}
+
+.reality-wall-overlay .rw-context p {
+  margin: 0;
+  color: #1e293b;
+}
+
+.reality-wall-overlay .rw-verification {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #f1f5f9;
+  border-radius: 6px;
+}
+
+.reality-wall-overlay .rw-verification code {
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: #0f172a;
+  word-break: break-word;
+  background: transparent;
+}
+
+.reality-wall-overlay .rw-copy {
+  flex-shrink: 0;
+  appearance: none;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.reality-wall-overlay .rw-copy:hover {
+  background: #e2e8f0;
+}
+
+.reality-wall-overlay .rw-loading {
+  align-items: center;
+  flex-direction: row;
+  gap: 10px;
+  color: #475569;
+}
+
+.reality-wall-overlay .rw-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #cbd5e1;
+  border-top-color: #0f172a;
+  border-radius: 50%;
+  animation: reality-wall-spin 0.7s linear infinite;
+}
+
+@keyframes reality-wall-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.reality-wall-overlay .rw-error {
+  margin: 0;
+  color: #991b1b;
+  font-weight: 600;
+}
+
+.reality-wall-overlay .rw-error-hint {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
