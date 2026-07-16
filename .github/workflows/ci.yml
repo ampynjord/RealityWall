@@ -120,12 +120,18 @@ jobs:
         id: check
         env:
           SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+          SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: |
-          if [ -n "$SSH_HOST" ]; then
+          if [ -n "$SSH_HOST" ] && [ -n "$SSH_PORT" ] && [ -n "$SSH_USER" ] \
+             && [ -n "$SSH_KEY" ] && [ -n "$SSH_KNOWN_HOSTS" ] && [ -n "$DEPLOY_PATH" ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Déploiement VPS ignoré : secrets DEPLOY_SSH_* non configurés. Le backend est optionnel depuis le passage en BYOK (voir README), l'extension ne dépend pas de ce déploiement."
+            echo "::notice::Déploiement VPS ignoré : au moins un des secrets DEPLOY_SSH_HOST/PORT/USER/KEY/KNOWN_HOSTS ou DEPLOY_PATH n'est pas configuré. Le backend est optionnel depuis le passage en BYOK (voir README), l'extension ne dépend pas de ce déploiement."
           fi
 
       - name: Configurer l'accès SSH
