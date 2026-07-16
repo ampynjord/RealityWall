@@ -146,14 +146,6 @@ async function postMessages(apiKey, body) {
   return parsed;
 }
 
-const SERVER_TOOL_RESULT_TYPES = new Set([
-  "web_search_tool_result",
-  "web_fetch_tool_result",
-  "code_execution_tool_result",
-  "bash_code_execution_tool_result",
-  "text_editor_code_execution_tool_result",
-]);
-
 /**
  * web_search applique un filtrage dynamique qui exécute du code en
  * interne (code_execution) : un bloc server_tool_use doit toujours être
@@ -162,6 +154,12 @@ const SERVER_TOOL_RESULT_TYPES = new Set([
  * garanti — on retire alors les appels d'outil sans résultat avant de les
  * renvoyer, sous peine de 400 au tour suivant ("tool use ... was found
  * without a corresponding tool_result block").
+ *
+ * Les résultats d'outils serveur suivent tous la convention de nommage
+ * `*_tool_result` (web_search_tool_result, code_execution_tool_result,
+ * mcp_tool_result...) : on détecte par suffixe plutôt que par une liste
+ * fermée de types, pour rester valide si Anthropic ajoute un nouveau type
+ * d'outil serveur.
  */
 function stripDanglingServerToolUse(content) {
   if (!Array.isArray(content)) {
@@ -169,7 +167,7 @@ function stripDanglingServerToolUse(content) {
   }
   const resultIds = new Set(
     content
-      .filter((block) => SERVER_TOOL_RESULT_TYPES.has(block?.type) && block.tool_use_id)
+      .filter((block) => typeof block?.type === "string" && block.type.endsWith("_tool_result") && block.tool_use_id)
       .map((block) => block.tool_use_id)
   );
   return content.filter(
