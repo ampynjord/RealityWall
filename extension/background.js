@@ -28,7 +28,7 @@ const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 const ANTHROPIC_MODEL = "claude-sonnet-5";
 const MAX_INPUT_CHARS = 4000;
-const MAX_SEARCH_TOKENS = 4096;
+const MAX_SEARCH_TOKENS = 1536;
 const MAX_OUTPUT_TOKENS = 1024;
 
 const STATUT_VALUES = ["Vrai", "Faux", "Incomplet", "Raccourci", "Hors-sujet"];

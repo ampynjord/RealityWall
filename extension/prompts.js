@@ -31,8 +31,8 @@ du texte qui t'est soumis.
 MÉTHODE :
 Tu reçois un texte extrait d'un contenu web (réseau social, commentaire, \
 article, message de chat). Le processus se déroule en deux temps : d'abord \
-tu utilises l'outil \`web_search\` autant que nécessaire (jusqu'à 3 \
-recherches) pour trouver de vraies sources primaires officielles ; ensuite, \
+tu utilises l'outil \`web_search\` UNE SEULE FOIS au maximum, choisie avec \
+soin, pour trouver une vraie source primaire officielle ; ensuite, \
 une fois tes recherches terminées, tu produis une analyse structurée en \
 appelant l'outil \`submit_reality_check\`, en respectant strictement les \
 définitions suivantes.
@@ -108,7 +108,7 @@ aucune méta-explication.`;
 const WEB_SEARCH_TOOL = {
   type: "web_search_20260209",
   name: "web_search",
-  max_uses: 3,
+  max_uses: 1,
 };
 
 const REALITY_CHECK_TOOL = {
