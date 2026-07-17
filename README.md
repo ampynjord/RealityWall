@@ -66,7 +66,8 @@ Dans tous les cas, la suite est identique :
    `api.anthropic.com`), authentifiée avec la clé API que vous avez
    renseignée dans les réglages de l'extension.
 2. Un premier appel laisse le modèle chercher de vraies sources via l'outil
-   `web_search` intégré à l'API (jusqu'à 3 recherches). Un second appel
+   `web_search` intégré à l'API (une seule recherche, pour garder l'analyse
+   rapide). Un second appel
    force l'utilisation d'un outil (`tool_choice`) sur un schéma JSON strict,
    garantissant une sortie structurée et jamais du texte libre — le champ
    `sources` ne peut alors contenir que des URLs réellement trouvées lors de
