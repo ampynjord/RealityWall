@@ -65,22 +65,24 @@ Dans tous les cas, la suite est identique :
    caractères) **directement** à l'API Claude (Anthropic,
    `api.anthropic.com`), authentifiée avec la clé API que vous avez
    renseignée dans les réglages de l'extension.
-2. Un premier appel laisse le modèle chercher de vraies sources via l'outil
-   `web_search` intégré à l'API (une seule recherche, pour garder l'analyse
-   rapide). Un second appel
-   force l'utilisation d'un outil (`tool_choice`) sur un schéma JSON strict,
-   garantissant une sortie structurée et jamais du texte libre — le champ
-   `sources` ne peut alors contenir que des URLs réellement trouvées lors de
-   la recherche, jamais inventées.
+2. Un seul appel donne au modèle l'outil `web_search` intégré à l'API (une
+   seule recherche, pour garder l'analyse rapide) et l'outil
+   `submit_reality_check` : il cherche de vraies sources puis appelle
+   directement l'outil de sortie structurée dans la même réponse, sans
+   aller-retour réseau supplémentaire — le champ `sources` ne peut alors
+   contenir que des URLs réellement trouvées lors de la recherche, jamais
+   inventées. Dans le rare cas où le modèle s'arrête après la recherche sans
+   finaliser, un second appel de secours force l'utilisation de l'outil
+   (`tool_choice`) pour garantir une sortie structurée dans tous les cas.
 3. Une pop-up apparaît au niveau du curseur (ou en position par défaut sur
    mobile) avec le verdict : **statut** factuel, **sophismes rhétoriques**
    détectés, **contexte** manquant, et les **sources** trouvées, avec un
    lien direct vers chacune.
 
-Le passage par deux appels et une recherche web réelle rend l'analyse un peu
-plus lente qu'un simple appel (comptez quelques secondes de plus) et peut
-entraîner un coût par recherche en plus du coût habituel par token — voir la
-tarification de l'outil `web_search` sur [platform.claude.com](https://platform.claude.com).
+Le passage par une recherche web réelle rend l'analyse un peu plus lente
+qu'un simple appel (comptez quelques secondes de plus) et peut entraîner un
+coût par recherche en plus du coût habituel par token — voir la tarification
+de l'outil `web_search` sur [platform.claude.com](https://platform.claude.com).
 
 **Plateformes prises en charge** : Chrome/Edge/Brave desktop, Firefox
 desktop, Firefox pour Android. Chrome pour Android et iOS, ainsi que tous
@@ -209,11 +211,11 @@ chemin n'existe pas sur ces plateformes, quelle que soit l'extension.
 
 ## Le moteur de qualification des faits
 
-Pour chaque texte analysé, un premier appel à Claude laisse le modèle
-chercher via l'outil `web_search`, puis un second appel force l'utilisation
-de l'outil `submit_reality_check` (défini dans `extension/prompts.js`), ce
-qui renvoie un JSON structuré sur quatre axes, sans aucun risque de sortie
-mal formée :
+Pour chaque texte analysé, Claude reçoit en un seul appel l'outil
+`web_search` et l'outil `submit_reality_check` (défini dans
+`extension/prompts.js`) : il cherche puis appelle l'outil de sortie dans la
+même réponse, ce qui renvoie un JSON structuré sur quatre axes, sans aucun
+risque de sortie mal formée :
 
 ```json
 {

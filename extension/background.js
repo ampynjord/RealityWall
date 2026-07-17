@@ -28,7 +28,7 @@ const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 const ANTHROPIC_MODEL = "claude-sonnet-5";
 const MAX_INPUT_CHARS = 4000;
-const MAX_SEARCH_TOKENS = 1536;
+const MAX_COMBINED_TOKENS = 2560;
 const MAX_OUTPUT_TOKENS = 1024;
 
 const STATUT_VALUES = ["Vrai", "Faux", "Incomplet", "Raccourci", "Hors-sujet"];
@@ -117,14 +117,23 @@ function friendlyApiError(status, body) {
   return `Erreur API Anthropic (${status}) : ${apiMessage || "réponse inattendue."}`;
 }
 
-function extractToolInput(responseBody) {
+/** Retourne l'input de l'outil submit_reality_check, ou null s'il est absent. */
+function tryExtractToolInput(responseBody) {
   const blocks = Array.isArray(responseBody.content) ? responseBody.content : [];
   for (const block of blocks) {
     if (block.type === "tool_use" && block.name === TOOL_NAME) {
-      return block.input;
+      return block.input ?? null;
     }
   }
-  throw new Error("Le modèle n'a pas renvoyé d'analyse structurée.");
+  return null;
+}
+
+function extractToolInput(responseBody) {
+  const input = tryExtractToolInput(responseBody);
+  if (input === null) {
+    throw new Error("Le modèle n'a pas renvoyé d'analyse structurée.");
+  }
+  return input;
 }
 
 async function postMessages(apiKey, body) {
@@ -176,26 +185,38 @@ function stripDanglingServerToolUse(content) {
 }
 
 /**
- * Deux appels successifs : le premier laisse le modèle chercher librement
- * de vraies sources via web_search (tool_choice auto), le second force
- * l'appel de submit_reality_check une fois les recherches terminées, pour
- * que le champ sources cite des URLs réellement trouvées plutôt qu'une
- * simple requête de recherche inventée.
+ * web_search est un outil serveur : sa recherche s'exécute et le modèle
+ * reprend sa génération dans la MÊME réponse HTTP, sans aller-retour
+ * client supplémentaire. On propose donc les deux outils dès le premier
+ * appel (tool_choice auto) pour qu'il cherche puis appelle
+ * submit_reality_check dans un seul échange — un round-trip réseau au
+ * lieu de deux, et le modèle n'a pas à relire tout l'historique de
+ * recherche comme entrée d'un second appel.
+ *
+ * Dans le rare cas où le modèle s'arrête après la recherche sans finaliser
+ * (tool_choice auto n'oblige à rien), un second appel de secours force
+ * l'appel de submit_reality_check, pour ne jamais renvoyer une erreur à
+ * l'utilisateur.
  */
 async function callAnthropic(apiKey, text, sourceUrl) {
   const messages = [{ role: "user", content: buildUserPrompt(text, sourceUrl) }];
 
-  const searchBody = await postMessages(apiKey, {
+  const combinedBody = await postMessages(apiKey, {
     model: ANTHROPIC_MODEL,
-    max_tokens: MAX_SEARCH_TOKENS,
+    max_tokens: MAX_COMBINED_TOKENS,
     system: SYSTEM_PROMPT,
-    tools: [WEB_SEARCH_TOOL],
+    tools: [WEB_SEARCH_TOOL, REALITY_CHECK_TOOL],
     messages,
   });
 
+  const fastResult = tryExtractToolInput(combinedBody);
+  if (fastResult !== null) {
+    return validateRealityCheckResult(fastResult);
+  }
+
   messages.push({
     role: "assistant",
-    content: stripDanglingServerToolUse(searchBody.content),
+    content: stripDanglingServerToolUse(combinedBody.content),
   });
   messages.push({ role: "user", content: buildFinalizePrompt() });
 
