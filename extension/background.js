@@ -122,7 +122,7 @@ function tryExtractToolInput(responseBody) {
   const blocks = Array.isArray(responseBody.content) ? responseBody.content : [];
   for (const block of blocks) {
     if (block.type === "tool_use" && block.name === TOOL_NAME) {
-      return block.input;
+      return block.input ?? null;
     }
   }
   return null;
@@ -210,7 +210,7 @@ async function callAnthropic(apiKey, text, sourceUrl) {
   });
 
   const fastResult = tryExtractToolInput(combinedBody);
-  if (fastResult) {
+  if (fastResult !== null) {
     return validateRealityCheckResult(fastResult);
   }
 
