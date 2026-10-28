@@ -10,18 +10,20 @@ const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 const DEFAULT_MODEL = "claude-sonnet-5";
 const MAX_INPUT_CHARS = 4000;
-const MAX_COMBINED_TOKENS = 2560;
-const MAX_OUTPUT_TOKENS = 1024;
+const MAX_CAPTION_CHARS = 3000;
+const MAX_DESCRIPTION_CHARS = 500;
+const MAX_IMAGES = 3;
+const MAX_FRAME_BASE64_CHARS = 1500000;
+const MAX_COMBINED_TOKENS = 3072;
+const MAX_OUTPUT_TOKENS = 1536;
 const MAX_SOURCES = 3;
+const MAX_RHETORIQUE = 3;
+const MAX_REPLY_CHARS = 800;
 const CACHE_MAX_ENTRIES = 50;
 
 const STATUT_VALUES = ["Vrai", "Faux", "Incomplet", "Raccourci", "Hors-sujet"];
-const RHETORIQUE_VALUES = [
-  "Ad Hominem / Association",
-  "Homme de Paille (Strawman)",
-  "Faux Dilemme",
-  "Diversion / Esquive",
-];
+// Source unique : le catalogue de prompts.js (enum du schéma + prompt).
+const RHETORIQUE_VALUES = RHETORIQUE_TYPES;
 
 // Statuts HTTP transitoires pour lesquels un unique nouvel essai est tenté.
 const RETRYABLE_STATUSES = [429, 500, 502, 503, 529];
@@ -46,7 +48,19 @@ function validateRealityCheckResult(data) {
     if (!item || !RHETORIQUE_VALUES.includes(item.type) || typeof item.explication !== "string" || !item.explication) {
       throw new Error("Réponse du modèle non conforme : élément rhetorique invalide.");
     }
+    if (item.extrait !== undefined && typeof item.extrait !== "string") {
+      throw new Error("Réponse du modèle non conforme : extrait invalide.");
+    }
+    item.extrait = item.extrait || "";
   }
+  if (data.resume !== undefined && typeof data.resume !== "string") {
+    throw new Error("Réponse du modèle non conforme : resume invalide.");
+  }
+  data.resume = data.resume || "";
+  if (data.reponse_suggeree !== undefined && typeof data.reponse_suggeree !== "string") {
+    throw new Error("Réponse du modèle non conforme : reponse_suggeree invalide.");
+  }
+  data.reponse_suggeree = data.reponse_suggeree || "";
   if (!data.contexte || typeof data.contexte.probleme_detecte !== "boolean") {
     throw new Error("Réponse du modèle non conforme : contexte invalide.");
   }
@@ -214,19 +228,139 @@ function getWebSearchTool(model) {
   return /haiku/i.test(model) ? WEB_SEARCH_TOOL_BASIC : WEB_SEARCH_TOOL;
 }
 
-async function postMessages(apiKey, body) {
+/** Coupe un texte à `max` caractères (sans casser la limite d'entrée de l'API). */
+function clipText(value, max) {
+  const text = String(value || "").trim();
+  return text.length > max ? text.slice(0, max) : text;
+}
+
+/** Forme comparable d'un texte pour retrouver une citation (casse, espaces, apostrophes). */
+function normalizeForMatch(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[‘’ʼ`´]/g, "'")
+    .replace(/[“”«»]/g, '"')
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Efface la citation d'un procédé rhétorique si elle ne figure pas
+ * réellement dans le contenu analysé (le procédé est conservé, mais on
+ * n'affiche pas une citation que l'auteur n'a jamais écrite).
+ */
+function verifyExtraits(items, corpus) {
+  const haystack = normalizeForMatch(corpus);
+  for (const item of items) {
+    const quote = normalizeForMatch(item.extrait).replace(/^[.…\s]+|[.…\s]+$/g, "");
+    item.extrait = quote && haystack.includes(quote) ? item.extrait.trim() : "";
+  }
+  return items;
+}
+
+/** Retire toute URL de la réponse suggérée (le lien vérifié est ajouté par l'interface). */
+function sanitizeReply(text) {
+  return String(text || "")
+    .replace(/(?:https?:\/\/|www\.)\S+/gi, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+    .slice(0, MAX_REPLY_CHARS);
+}
+
+/** Image de capture : data URL base64 jpeg/png/webp de taille raisonnable, sinon null. */
+function parseFrameDataUrl(value) {
+  const match = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(value || ""));
+  if (!match || match[2].length > MAX_FRAME_BASE64_CHARS) {
+    return null;
+  }
+  return { media_type: match[1], data: match[2] };
+}
+
+/** Texte brut de tout ce qui a été analysé, pour vérifier les citations. */
+function contextCorpus(context) {
+  return [context.text, context.captions, context.pageTitle, context.description].filter(Boolean).join("\n");
+}
+
+/** Ce qui a réellement été pris en compte, affiché à l'utilisateur. */
+function describeContext(context) {
+  const used = [];
+  const text = String(context.text || "");
+  if (text) {
+    used.push(`texte (${text.length} car.)`);
+  }
+  const images = Array.isArray(context.images) ? context.images.length : 0;
+  if (images > 0) {
+    used.push(`${images} image${images > 1 ? "s" : ""}`);
+  }
+  if (parseFrameDataUrl(context.frame)) {
+    used.push("capture vidéo");
+  }
+  if (context.captions) {
+    used.push(`sous-titres (${context.captions.length} car.)`);
+  }
+  return { used, notes: Array.isArray(context.notes) ? [...context.notes] : [] };
+}
+
+/** Contenu du message utilisateur : images (URL ou capture) puis texte. */
+function buildUserContent(context, webSearch, reply) {
+  const prompt = buildUserPrompt(context, webSearch, reply);
+  const blocks = [];
+  for (const url of (context.images || []).slice(0, MAX_IMAGES)) {
+    if (isSafeHttpUrl(url)) {
+      blocks.push({ type: "image", source: { type: "url", url } });
+    }
+  }
+  const frame = parseFrameDataUrl(context.frame);
+  if (frame) {
+    blocks.push({ type: "image", source: { type: "base64", media_type: frame.media_type, data: frame.data } });
+  }
+  if (blocks.length === 0) {
+    return prompt;
+  }
+  blocks.push({ type: "text", text: prompt });
+  return blocks;
+}
+
+/** Même contexte sans les images servies par URL (l'API peut ne pas pouvoir les télécharger). */
+function withoutUrlImages(context) {
+  return { ...context, images: [] };
+}
+
+class AnthropicError extends Error {
+  constructor(message, status, apiMessage) {
+    super(message);
+    this.name = "AnthropicError";
+    this.status = status;
+    this.apiMessage = apiMessage || "";
+  }
+}
+
+async function postMessages(apiKey, body, signal) {
   let attempt = 0;
   for (;;) {
-    const response = await fetch(ANTHROPIC_API_URL, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": ANTHROPIC_VERSION,
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
-      body: JSON.stringify(body),
-    });
+    let response;
+    try {
+      response = await fetch(ANTHROPIC_API_URL, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": ANTHROPIC_VERSION,
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify(body),
+        signal,
+      });
+    } catch (error) {
+      if (error && error.name === "AbortError") {
+        const aborted = new Error("Analyse annulée.");
+        aborted.name = "AbortError";
+        throw aborted;
+      }
+      throw new Error("Impossible de joindre l'API Anthropic. Vérifiez votre connexion internet.");
+    }
 
     const parsed = await response.json().catch(() => null);
     if (response.ok) {
@@ -237,8 +371,34 @@ async function postMessages(apiKey, body) {
       await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
       continue;
     }
-    throw new Error(friendlyApiError(response.status, parsed));
+    throw new AnthropicError(
+      friendlyApiError(response.status, parsed),
+      response.status,
+      parsed && parsed.error && parsed.error.message
+    );
   }
+}
+
+/** Vérifie une clé API avec un appel gratuit (liste des modèles). */
+async function testApiKey(apiKey) {
+  let response;
+  try {
+    response = await fetch(`${ANTHROPIC_API_URL.replace(/\/messages$/, "")}/models?limit=1`, {
+      method: "GET",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": ANTHROPIC_VERSION,
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+    });
+  } catch (error) {
+    throw new Error("Impossible de joindre l'API Anthropic. Vérifiez votre connexion internet.");
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(friendlyApiError(response.status, body));
+  }
+  return true;
 }
 
 function cacheGet(key) {
@@ -258,8 +418,75 @@ function cacheSet(key, value) {
   }
 }
 
+/** Un ou deux appels API pour un contexte donné (voir callAnthropic). */
+async function requestAnalysis(apiKey, context, options) {
+  const model = options.model || DEFAULT_MODEL;
+  const webSearch = options.webSearch !== false;
+  const reply = { enabled: options.reply !== false, style: options.replyStyle };
+  const messages = [{ role: "user", content: buildUserContent(context, webSearch, reply) }];
+
+  if (!webSearch) {
+    const body = await postMessages(
+      apiKey,
+      {
+        model,
+        max_tokens: MAX_OUTPUT_TOKENS,
+        system: SYSTEM_PROMPT,
+        tools: [REALITY_CHECK_TOOL],
+        tool_choice: { type: "tool", name: TOOL_NAME },
+        messages,
+      },
+      options.signal
+    );
+    const result = validateRealityCheckResult(extractToolInput(body));
+    result.sources = [];
+    return result;
+  }
+
+  const combinedBody = await postMessages(
+    apiKey,
+    {
+      model,
+      max_tokens: MAX_COMBINED_TOKENS,
+      system: SYSTEM_PROMPT,
+      tools: [getWebSearchTool(model), REALITY_CHECK_TOOL],
+      messages,
+    },
+    options.signal
+  );
+  const searchedUrls = collectSearchUrls(combinedBody.content);
+
+  let toolInput = tryExtractToolInput(combinedBody);
+  if (toolInput === null) {
+    messages.push({
+      role: "assistant",
+      content: stripDanglingServerToolUse(combinedBody.content),
+    });
+    messages.push({ role: "user", content: buildFinalizePrompt() });
+
+    const finalBody = await postMessages(
+      apiKey,
+      {
+        model,
+        max_tokens: MAX_OUTPUT_TOKENS,
+        system: SYSTEM_PROMPT,
+        tools: [REALITY_CHECK_TOOL],
+        tool_choice: { type: "tool", name: TOOL_NAME },
+        messages,
+      },
+      options.signal
+    );
+    toolInput = extractToolInput(finalBody);
+  }
+
+  const result = validateRealityCheckResult(toolInput);
+  result.sources = sanitizeSources(result.sources, searchedUrls);
+  return result;
+}
+
 /**
- * Analyse un texte.
+ * Analyse un contexte : { mode, text, pageTitle, pageUrl, description,
+ * captions, images[], frame, notes[] } (voir context.js).
  *
  * Avec recherche web : web_search est un outil serveur, sa recherche
  * s'exécute et le modèle reprend sa génération dans la MÊME réponse HTTP.
@@ -271,65 +498,64 @@ function cacheSet(key, value) {
  * Sans recherche web : un seul appel avec l'outil forcé (le plus rapide),
  * sans source.
  *
- * Dans tous les cas, les sources renvoyées sont filtrées sur les URLs
- * réellement trouvées par la recherche.
+ * Dans tous les cas : sources filtrées sur les URLs réellement trouvées,
+ * citations vérifiées dans le contenu, réponse suggérée sans URL, et — si
+ * l'API ne peut pas télécharger une image — nouvelle tentative sans les
+ * images servies par URL.
  */
-async function callAnthropic(apiKey, text, sourceUrl, options = {}) {
+async function callAnthropic(apiKey, rawContext, options = {}) {
+  const context = {
+    ...rawContext,
+    text: clipText(rawContext.text, MAX_INPUT_CHARS),
+    captions: clipText(rawContext.captions, MAX_CAPTION_CHARS),
+    description: clipText(rawContext.description, MAX_DESCRIPTION_CHARS),
+    images: Array.isArray(rawContext.images) ? rawContext.images.filter(isSafeHttpUrl).slice(0, MAX_IMAGES) : [],
+    notes: Array.isArray(rawContext.notes) ? [...rawContext.notes] : [],
+  };
   const model = options.model || DEFAULT_MODEL;
   const webSearch = options.webSearch !== false;
 
-  const cacheKey = JSON.stringify([model, webSearch, sourceUrl || "", text]);
-  const cached = cacheGet(cacheKey);
-  if (cached) {
-    return cached;
-  }
-
-  const messages = [{ role: "user", content: buildUserPrompt(text, sourceUrl, webSearch) }];
-
-  let result;
-  if (!webSearch) {
-    const body = await postMessages(apiKey, {
-      model,
-      max_tokens: MAX_OUTPUT_TOKENS,
-      system: SYSTEM_PROMPT,
-      tools: [REALITY_CHECK_TOOL],
-      tool_choice: { type: "tool", name: TOOL_NAME },
-      messages,
-    });
-    result = validateRealityCheckResult(extractToolInput(body));
-    result.sources = [];
-  } else {
-    const combinedBody = await postMessages(apiKey, {
-      model,
-      max_tokens: MAX_COMBINED_TOKENS,
-      system: SYSTEM_PROMPT,
-      tools: [getWebSearchTool(model), REALITY_CHECK_TOOL],
-      messages,
-    });
-    const searchedUrls = collectSearchUrls(combinedBody.content);
-
-    let toolInput = tryExtractToolInput(combinedBody);
-    if (toolInput === null) {
-      messages.push({
-        role: "assistant",
-        content: stripDanglingServerToolUse(combinedBody.content),
-      });
-      messages.push({ role: "user", content: buildFinalizePrompt() });
-
-      const finalBody = await postMessages(apiKey, {
-        model,
-        max_tokens: MAX_OUTPUT_TOKENS,
-        system: SYSTEM_PROMPT,
-        tools: [REALITY_CHECK_TOOL],
-        tool_choice: { type: "tool", name: TOOL_NAME },
-        messages,
-      });
-      toolInput = extractToolInput(finalBody);
+  const cacheKey = JSON.stringify([
+    model,
+    webSearch,
+    options.reply !== false,
+    options.replyStyle || "court",
+    context.mode || "selection",
+    context.pageUrl || "",
+    context.text,
+    context.captions,
+    context.images,
+    context.frame ? context.frame.length : 0,
+  ]);
+  if (!options.fresh) {
+    const cached = cacheGet(cacheKey);
+    if (cached) {
+      return cached;
     }
-
-    result = validateRealityCheckResult(toolInput);
-    result.sources = sanitizeSources(result.sources, searchedUrls);
   }
+
+  let used = context;
+  let result;
+  try {
+    result = await requestAnalysis(apiKey, used, options);
+  } catch (error) {
+    const imageProblem =
+      error instanceof AnthropicError &&
+      error.status === 400 &&
+      /image/i.test(error.apiMessage) &&
+      used.images.length > 0;
+    if (!imageProblem) {
+      throw error;
+    }
+    used = withoutUrlImages(used);
+    used.notes.push("Les images de la page n'ont pas pu être téléchargées par l'API : analyse sans elles.");
+    result = await requestAnalysis(apiKey, used, options);
+  }
+
+  verifyExtraits(result.rhetorique, contextCorpus(used));
+  result.rhetorique = result.rhetorique.slice(0, MAX_RHETORIQUE);
+  result.reponse_suggeree = options.reply === false ? "" : sanitizeReply(result.reponse_suggeree);
+  result.meta = describeContext(used);
 
   cacheSet(cacheKey, result);
   return result;

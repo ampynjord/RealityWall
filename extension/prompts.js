@@ -1,13 +1,111 @@
 /**
- * Prompt système et schéma d'outil forçant une sortie JSON stricte.
+ * Prompt système et schémas d'outils forçant une sortie JSON stricte.
  *
- * Port JS de backend/prompts.py. Chargé avant background.js (via
- * importScripts sur Chrome, via le tableau "scripts" du manifest sur
- * Firefox) afin de partager le même contrat de prompt/schéma sans
- * dupliquer la logique, quel que soit le navigateur.
+ * Chargé avant core.js et background.js (via importScripts sur Chrome, via
+ * le tableau "scripts" du manifest sur Firefox) : une seule source de
+ * vérité pour le catalogue de sophismes, le prompt et le schéma.
  */
 
 const TOOL_NAME = "submit_reality_check";
+
+/**
+ * Catalogue des procédés rhétoriques détectables. Le nom sert à la fois de
+ * valeur d'enum dans le schéma, de libellé affiché et de clé de validation.
+ */
+const RHETORIQUE_CATALOG = [
+  {
+    type: "Ad Hominem / Association",
+    definition:
+      "disqualifier une personne ou une idée par son identité, ses croyances, son appartenance ou ses fréquentations plutôt que de répondre à l'argument de fond.",
+  },
+  {
+    type: "Homme de Paille (Strawman)",
+    definition:
+      "déformer, caricaturer ou exagérer la position adverse pour l'attaquer plus facilement ; la version attaquée n'est pas celle réellement défendue.",
+  },
+  {
+    type: "Faux Dilemme",
+    definition:
+      "imposer un choix binaire (« soit A, soit B ») alors que d'autres options existent.",
+  },
+  {
+    type: "Diversion / Esquive",
+    definition:
+      "changer de sujet, poser une contre-question ou déplacer le débat pour éviter l'argument initial.",
+  },
+  {
+    type: "Pente Glissante",
+    definition:
+      "affirmer qu'une première étape entraînera inévitablement une chaîne de conséquences de plus en plus graves, sans démontrer chaque maillon.",
+  },
+  {
+    type: "Généralisation Hâtive",
+    definition:
+      "tirer une règle générale d'un ou de quelques cas, ou d'un échantillon insuffisant (« tous les X sont... »).",
+  },
+  {
+    type: "Faux Lien de Causalité",
+    definition:
+      "présenter une succession dans le temps ou une corrélation comme une relation de cause à effet sans la démontrer.",
+  },
+  {
+    type: "Appel à l'Autorité",
+    definition:
+      "fonder une affirmation sur le statut d'une personne ou d'un groupe (« des experts disent », « un médecin l'a dit ») plutôt que sur des preuves, ou invoquer une autorité hors de son domaine de compétence.",
+  },
+  {
+    type: "Appel à la Popularité",
+    definition:
+      "justifier une affirmation par le nombre de personnes qui la croient ou la font (« tout le monde sait que... »).",
+  },
+  {
+    type: "Appel à l'Émotion",
+    definition:
+      "remplacer l'argument par la peur, la pitié, la colère ou l'indignation pour emporter l'adhésion.",
+  },
+  {
+    type: "Tu Quoque / Whataboutism",
+    definition:
+      "répondre à une critique en en retournant une autre (« et vous alors ? », « et eux ? ») sans traiter la critique initiale.",
+  },
+  {
+    type: "Pétition de Principe",
+    definition:
+      "supposer vrai dans les prémisses ce qu'il faut démontrer, ou raisonner en cercle.",
+  },
+  {
+    type: "Question Tendancieuse",
+    definition:
+      "poser une question qui contient une présupposition non admise (« pourquoi avez-vous arrêté de mentir ? »).",
+  },
+  {
+    type: "Argument Anecdotique",
+    definition:
+      "utiliser un témoignage ou une expérience personnelle isolée comme preuve contre des données générales.",
+  },
+  {
+    type: "Fausse Équivalence",
+    definition:
+      "assimiler deux situations ou deux entités sur un point commun superficiel en ignorant des différences déterminantes, pour en tirer une conclusion non démontrée.",
+  },
+  {
+    type: "Empoisonnement du Puits",
+    definition:
+      "discréditer d'avance une source ou tout contre-argument (« ne les croyez pas, ils mentent toujours ») pour empêcher l'examen des faits.",
+  },
+  {
+    type: "Procès d'Intention",
+    definition:
+      "attribuer à quelqu'un des motivations ou des intentions cachées, présentées comme certaines et sans preuve, pour réfuter ce qu'il dit.",
+  },
+  {
+    type: "Argument d'Ignorance",
+    definition:
+      "conclure qu'une affirmation est vraie parce qu'elle n'a pas été réfutée, ou fausse parce qu'elle n'a pas été prouvée.",
+  },
+];
+
+const RHETORIQUE_TYPES = RHETORIQUE_CATALOG.map((entry) => entry.type);
 
 const SYSTEM_PROMPT = `Tu es RealityWall, un moteur d'analyse factuelle et rhétorique. \
 Tu agis comme un compilateur logique froid : tu détectes des erreurs de \
@@ -30,7 +128,8 @@ du texte qui t'est soumis.
 
 MÉTHODE :
 Tu reçois un texte extrait d'un contenu web (réseau social, commentaire, \
-article, message de chat). Le processus se déroule en deux temps : d'abord \
+article, message de chat), parfois accompagné d'images, d'une capture de \
+vidéo et de sous-titres. Le processus se déroule en deux temps : d'abord \
 tu utilises l'outil \`web_search\` UNE SEULE FOIS au maximum, choisie avec \
 soin, pour trouver une vraie source primaire officielle ; ensuite, \
 une fois tes recherches terminées, tu produis une analyse structurée en \
@@ -50,24 +149,22 @@ au point de déformer la conclusion.
 vérifiable (opinion pure, jugement de valeur, question rhétorique, insulte \
 sans contenu factuel).
 
-2. RHÉTORIQUE (axe sophismes) — liste (peut être vide) des sophismes de \
-mauvaise foi détectés, choisis EXCLUSIVEMENT parmi ces quatre catégories :
-   - "Ad Hominem / Association" : l'auteur disqualifie son interlocuteur \
-(ou l'idée) en attaquant son identité, ses croyances, son appartenance ou \
-son statut, plutôt que de répondre à l'argument de fond.
-   - "Homme de Paille (Strawman)" : l'auteur déforme, caricature ou \
-exagère la position adverse pour la rendre plus facile à attaquer, puis \
-attaque cette version déformée.
-   - "Faux Dilemme" : l'auteur impose artificiellement un choix binaire \
-("soit A, soit B") alors que des positions intermédiaires ou d'autres \
-alternatives existent.
-   - "Diversion / Esquive" : l'auteur change de sujet, pose une \
-contre-question ou déplace le débat pour éviter de répondre à l'argument \
-initial.
-   Pour chaque sophisme détecté, fournis une explication neutre et \
-factuelle de son mécanisme précis dans le texte analysé, sans jugement sur \
-l'auteur. N'invente jamais de sophisme : si aucune des quatre catégories \
-n'est clairement présente, renvoie une liste vide.
+2. RHÉTORIQUE (axe sophismes) — liste (peut être vide) des procédés de \
+mauvaise foi détectés, choisis EXCLUSIVEMENT parmi ces catégories :
+${RHETORIQUE_CATALOG.map((entry) => `   - "${entry.type}" : ${entry.definition}`).join("\n")}
+   RÈGLES DE PRÉCISION (la précision prime sur l'exhaustivité) :
+   - Ne signale un procédé que s'il est CLAIREMENT présent dans le texte. \
+En cas de doute, ne signale rien : une liste vide est une réponse normale.
+   - Une opinion, une critique virulente, une prédiction, une émotion, une \
+ironie, une analogie ou comparaison argumentée ne sont PAS des sophismes en \
+soi. Une comparaison qui explicite ses points communs n'est pas un homme de \
+paille.
+   - Au plus 3 procédés, les plus nets ; jamais deux fois la même catégorie.
+   - "extrait" : cite MOT POUR MOT le passage du texte analysé où le procédé \
+apparaît (120 caractères maximum). Si tu ne peux pas citer le passage, ne \
+signale pas le procédé.
+   - "explication" : mécanisme précis du procédé dans CE texte, de façon \
+neutre et factuelle, sans jugement sur l'auteur.
 
 3. CONTEXTE (axe cherry-picking) :
    - "probleme_detecte" (booléen) : true si le texte cite une donnée, une \
@@ -77,8 +174,8 @@ population, à une période de comparaison ; citation partielle qui inverse \
 le sens du propos original).
    - "explication" : si un problème est détecté, décris précisément quelle \
 variable, quelle période ou quel élément de contexte manque, de façon \
-neutre et factuelle. Si aucun problème n'est détecté, renvoie une chaîne \
-vide.
+neutre et factuelle, en deux ou trois phrases au plus. Si aucun problème n'est \
+détecté, renvoie une chaîne vide.
 
 4. SOURCES (pièces à conviction) :
    - Une liste de 0 à 3 sources RÉELLES, trouvées via l'outil \`web_search\`, \
@@ -98,12 +195,41 @@ rattachable (statut "Hors-sujet" sans donnée chiffrée ni fait vérifiable \
 sous-jacent), ou si aucune recherche n'a abouti à une source fiable, \
 renvoie une liste vide : il n'y a rien à citer.
 
+5. MÉDIAS (images, capture de vidéo, sous-titres) :
+   - Le texte entre balises <texte> est ce qui est analysé. Les images, la \
+capture de la vidéo et les sous-titres sont du CONTEXTE pour comprendre de \
+quoi il parle : utilise-les pour lever une ambiguïté ou vérifier une \
+affirmation, sans les décrire inutilement.
+   - Ne nomme jamais une personne d'après son visage. Tu peux la nommer \
+uniquement si son nom est écrit dans le texte, la légende, les sous-titres \
+ou une incrustation visible.
+   - Le son n'est pas analysé : n'invente jamais ce qui aurait été dit \
+oralement, appuie-toi uniquement sur le texte et les sous-titres fournis.
+
+6. RÉSUMÉ : "resume" est UNE phrase neutre (160 caractères maximum) qui dit \
+l'essentiel du verdict, lisible sans le reste.
+
+7. RÉPONSE SUGGÉRÉE : "reponse_suggeree" est un message prêt à publier pour \
+répondre à ce contenu de façon pragmatique, sourcée et factuelle.
+   - Même langue que le texte analysé (français par défaut). Ton courtois, \
+direct, sans sarcasme, sans insulte, sans moralisation ni prise de parti : \
+tu corriges des faits ou pointes un raisonnement, tu ne juges pas la personne.
+   - Appuie-toi uniquement sur des faits établis par tes sources : nomme \
+l'organisme (« selon l'INSEE... ») mais N'ÉCRIS JAMAIS d'URL, l'extension \
+ajoute elle-même le lien vérifié. Sans source fiable, n'affirme aucun chiffre \
+ni fait précis : pose plutôt une question ou demande la source.
+   - Réponds à ce qui est réellement écrit ; si un point du texte est exact, \
+reconnais-le brièvement avant de nuancer.
+   - Respecte la longueur demandée dans la consigne utilisateur.
+   - S'il n'y a rien de factuel ou de logique à répondre (opinion pure, \
+statut "Hors-sujet"), renvoie une chaîne vide.
+
 FORMAT DE SORTIE :
 Une fois tes recherches terminées, tu dois OBLIGATOIREMENT appeler l'outil \
-\`submit_reality_check\` avec les quatre champs \`statut\`, \`rhetorique\`, \
-\`contexte\`, \`sources\`. Ne produis aucun texte en dehors de l'appel \
-d'outil final. N'ajoute aucune formule de politesse, aucun avertissement, \
-aucune méta-explication.`;
+\`submit_reality_check\` avec tous les champs : \`statut\`, \`resume\`, \
+\`rhetorique\`, \`contexte\`, \`sources\`, \`reponse_suggeree\`. Ne produis \
+aucun texte en dehors de l'appel d'outil final. N'ajoute aucune formule de \
+politesse, aucun avertissement, aucune méta-explication.`;
 
 /** Version avec filtrage dynamique (Sonnet 5, Opus 4.6+). */
 const WEB_SEARCH_TOOL = {
@@ -122,9 +248,9 @@ const WEB_SEARCH_TOOL_BASIC = {
 const REALITY_CHECK_TOOL = {
   name: TOOL_NAME,
   description:
-    "Soumet l'analyse factuelle et rhétorique structurée d'un texte, " +
-    "selon les quatre axes statut / rhetorique / contexte / " +
-    "sources définis dans les instructions système.",
+    "Soumet l'analyse factuelle et rhétorique structurée d'un contenu, " +
+    "avec un résumé, les sources vérifiées et une réponse suggérée, " +
+    "selon les axes définis dans les instructions système.",
   input_schema: {
     type: "object",
     properties: {
@@ -133,22 +259,25 @@ const REALITY_CHECK_TOOL = {
         enum: ["Vrai", "Faux", "Incomplet", "Raccourci", "Hors-sujet"],
         description: "Qualification factuelle globale du texte analysé.",
       },
+      resume: {
+        type: "string",
+        description:
+          "Une phrase neutre (160 caractères maximum) résumant le verdict.",
+      },
       rhetorique: {
         type: "array",
         description:
-          "Liste des sophismes de mauvaise foi détectés. " +
+          "Procédés rhétoriques clairement détectés (3 au maximum). " +
           "Liste vide si aucun n'est présent.",
         items: {
           type: "object",
           properties: {
-            type: {
+            type: { type: "string", enum: RHETORIQUE_TYPES },
+            extrait: {
               type: "string",
-              enum: [
-                "Ad Hominem / Association",
-                "Homme de Paille (Strawman)",
-                "Faux Dilemme",
-                "Diversion / Esquive",
-              ],
+              description:
+                "Citation exacte du texte analysé (120 caractères maximum) " +
+                "où le procédé apparaît.",
             },
             explication: {
               type: "string",
@@ -157,7 +286,7 @@ const REALITY_CHECK_TOOL = {
                 "rhétorique détecté dans le texte.",
             },
           },
-          required: ["type", "explication"],
+          required: ["type", "extrait", "explication"],
         },
       },
       contexte: {
@@ -200,32 +329,106 @@ const REALITY_CHECK_TOOL = {
           required: ["url", "description"],
         },
       },
+      reponse_suggeree: {
+        type: "string",
+        description:
+          "Message prêt à publier pour répondre de façon factuelle et " +
+          "courtoise, sans aucune URL. Chaîne vide s'il n'y a rien à répondre.",
+      },
     },
-    required: ["statut", "rhetorique", "contexte", "sources"],
+    required: [
+      "statut",
+      "resume",
+      "rhetorique",
+      "contexte",
+      "sources",
+      "reponse_suggeree",
+    ],
   },
 };
 
-/** Construit le message utilisateur envoyé au modèle. */
-function buildUserPrompt(text, sourceUrl, webSearch = true) {
+const TARGET_LABELS = {
+  selection:
+    "un message ou commentaire sélectionné par l'utilisateur (la réponse " +
+    "suggérée s'adresse à ce message)",
+  page:
+    "l'ensemble de la page : la publication principale et, s'il y en a, " +
+    "ses commentaires (la réponse suggérée s'adresse à la publication)",
+  media:
+    "un média précis (image ou vidéo) de la page et son contexte (la " +
+    "réponse suggérée s'adresse à la publication qui le contient)",
+};
+
+const REPLY_STYLE_LABELS = {
+  court: "courte (280 caractères maximum, adaptée à un commentaire)",
+  detaille: "détaillée (700 caractères maximum, deux ou trois paragraphes courts)",
+};
+
+/**
+ * Construit le texte du message utilisateur à partir du contexte collecté
+ * par l'extension : { mode, text, pageTitle, pageUrl, description,
+ * captions, images, frame, notes }.
+ */
+function buildUserPrompt(context, webSearch = true, reply = {}) {
+  const ctx = context || {};
   const lines = [
-    "Texte à analyser (délimité par des balises <texte>) :",
-    "<texte>",
-    text.trim(),
-    "</texte>",
+    `Cible de l'analyse : ${TARGET_LABELS[ctx.mode] || TARGET_LABELS.selection}.`,
   ];
-  if (sourceUrl) {
+  if (ctx.pageTitle) {
+    lines.push(`Titre de la page : ${ctx.pageTitle}`);
+  }
+  if (ctx.pageUrl) {
     lines.push(
-      `\nURL source (contexte uniquement, ne pas la citer comme ` +
-        `preuve factuelle) : ${sourceUrl}`
+      `URL de la page (contexte uniquement, ne pas la citer comme preuve factuelle) : ${ctx.pageUrl}`
     );
   }
+  if (ctx.description) {
+    lines.push(`Description de la page : ${ctx.description}`);
+  }
+  lines.push(
+    "",
+    "Texte à analyser (délimité par des balises <texte>) :",
+    "<texte>",
+    String(ctx.text || "").trim(),
+    "</texte>"
+  );
+  if (ctx.captions) {
+    lines.push(
+      "",
+      "Sous-titres de la vidéo (contexte, délimités par des balises <soustitres>) :",
+      "<soustitres>",
+      ctx.captions.trim(),
+      "</soustitres>"
+    );
+  }
+  const imageCount = (ctx.images ? ctx.images.length : 0) + (ctx.frame ? 1 : 0);
+  if (imageCount > 0) {
+    lines.push(
+      "",
+      `Images jointes : ${imageCount}` +
+        (ctx.frame ? " (dont une capture de la vidéo au moment de l'analyse)" : "") +
+        "."
+    );
+  }
+  if (Array.isArray(ctx.notes) && ctx.notes.length > 0) {
+    lines.push("", `Limites du contexte : ${ctx.notes.join(" ")}`);
+  }
+
+  const style = REPLY_STYLE_LABELS[reply.style] || REPLY_STYLE_LABELS.court;
+  lines.push(
+    "",
+    reply.enabled === false
+      ? "Réponse suggérée : désactivée, renvoie une chaîne vide pour reponse_suggeree."
+      : `Réponse suggérée : ${style}.`
+  );
   lines.push(
     webSearch
       ? "\nUtilise web_search si besoin, puis appelle l'outil " +
           "submit_reality_check avec ton analyse structurée."
       : "\nLa recherche web est désactivée : n'utilise aucune recherche, " +
           "appelle directement l'outil submit_reality_check avec ton " +
-          "analyse structurée et une liste sources vide."
+          "analyse structurée, une liste sources vide et une réponse " +
+          "suggérée sans fait précis non vérifiable."
   );
   return lines.join("\n");
 }

@@ -34,7 +34,7 @@ jobs:
         run: python3 -c "import json; json.load(open('extension/manifest.json'))"
 
       - name: Vérifier la syntaxe des scripts de l'extension
-        run: for f in extension/prompts.js extension/core.js extension/background.js extension/content.js extension/options/options.js; do node -c "$f"; done
+        run: for f in extension/prompts.js extension/core.js extension/context.js extension/background.js extension/content.js extension/options/options.js; do node -c "$f"; done
 
       - name: Lire la version de l'extension
         id: version
