@@ -186,23 +186,6 @@ test("sanitizeReply retire toute URL et borne la longueur", () => {
   assert.equal(clean(undefined), "");
 });
 
-test("stripDanglingServerToolUse retire les appels serveur sans résultat", () => {
-  const ctx = loadContext(async () => {});
-  const strip = get(ctx, "stripDanglingServerToolUse");
-  const paired = [serverUse("a"), searchResult([], "a"), { type: "text", text: "ok" }];
-  assert.deepEqual(plain(strip(paired)), paired);
-
-  const truncated = [serverUse("a"), searchResult([], "a"), serverUse("b")];
-  assert.deepEqual(
-    plain(strip(truncated).map((b) => b.type + ":" + (b.id || b.tool_use_id))),
-    ["server_tool_use:a", "web_search_tool_result:a"]
-  );
-
-  // Type de résultat inconnu mais suivant la convention *_tool_result.
-  const future = [serverUse("c"), { type: "future_tool_result", tool_use_id: "c" }];
-  assert.equal(strip(future).length, 2);
-});
-
 test("isSafeHttpUrl refuse les schémas dangereux", () => {
   const ctx = loadContext(async () => {});
   const safe = get(ctx, "isSafeHttpUrl");
@@ -268,10 +251,13 @@ test("recherche web : un seul appel, deux outils, résultat nettoyé", async () 
   const { init, body } = fetchFn.calls[0];
   assert.equal(init.headers["anthropic-dangerous-direct-browser-access"], "true");
   assert.equal(init.headers["x-api-key"], "clé");
-  assert.equal(body.model, "claude-sonnet-5");
+  assert.equal(body.model, "claude-sonnet-5-5");
   assert.deepEqual(body.tools.map((t) => t.name), ["web_search", "submit_reality_check"]);
   assert.equal(body.tools[0].type, "web_search_20260209");
-  assert.equal(body.tool_choice, undefined);
+  assert.equal(body.tool_choice, undefined, "jamais de tool_choice forcé (400 sur les modèles 5.5)");
+  assert.deepEqual(plain(body.output_config), { effort: "medium" });
+  assert.equal(body.thinking, undefined, "la réflexion est gérée par le modèle");
+  assert.ok(body.max_tokens >= 8000, "marge pour la réflexion");
   assert.equal(typeof body.messages[0].content, "string", "texte seul : contenu simple");
 
   assert.deepEqual(plain(result.sources.map((s) => s.description)), ["Réelle"]);
@@ -334,6 +320,35 @@ test("si l'API ne peut pas télécharger une image, nouvel essai sans les images
   assert.match(result.meta.notes[0], /images de la page n'ont pas pu être téléchargées/);
 });
 
+test("robots.txt : analyse refaite sans les images, et le site est ensuite ignoré", async () => {
+  const robots = "This URL is disallowed by the website's robots.txt file.";
+  const fetchFn = fakeFetch([
+    jsonResponse(400, { error: { message: robots } }),
+    jsonResponse(200, { content: [submit(VALID)] }),
+    jsonResponse(200, { content: [submit(VALID)] }),
+  ]);
+  const ctx = loadContext(fetchFn);
+  const call = get(ctx, "callAnthropic");
+  const first = await call(
+    "clé",
+    ctxOf("Premier", { images: ["https://scontent.cdn.example/a.jpg"], frame: "data:image/jpeg;base64,AAAA" }),
+    { webSearch: false }
+  );
+  assert.equal(fetchFn.calls.length, 2);
+  assert.match(first.meta.notes[0], /site qui les interdit/);
+
+  // Même site, autre analyse : l'image n'est même plus envoyée (pas d'aller-retour perdu).
+  const second = await call(
+    "clé",
+    ctxOf("Second", { images: ["https://scontent.cdn.example/b.jpg", "https://autre.example/c.jpg"] }),
+    { webSearch: false }
+  );
+  assert.equal(fetchFn.calls.length, 3);
+  const urls = fetchFn.calls[2].body.messages[0].content.filter((b) => b.type === "image").map((b) => b.source.url);
+  assert.deepEqual(urls, ["https://autre.example/c.jpg"]);
+  assert.match(second.meta.notes[0], /Images ignorées/);
+});
+
 test("une erreur 400 sans rapport avec les images n'est pas retentée", async () => {
   const fetchFn = fakeFetch([jsonResponse(400, { error: { message: "max_tokens too large" } })]);
   await assert.rejects(
@@ -343,10 +358,20 @@ test("une erreur 400 sans rapport avec les images n'est pas retentée", async ()
   assert.equal(fetchFn.calls.length, 1);
 });
 
-test("recherche web : appel de secours forcé si le modèle ne finalise pas", async () => {
+test("recherche web : requête de secours autonome si le modèle ne finalise pas", async () => {
   const fetchFn = fakeFetch([
     jsonResponse(200, {
-      content: [serverUse("srv_1"), searchResult(["https://www.insee.fr/a"], "srv_1"), serverUse("srv_dangling")],
+      stop_reason: "pause_turn",
+      content: [
+        { type: "thinking", thinking: "", signature: "sig" },
+        serverUse("srv_1"),
+        {
+          type: "web_search_tool_result",
+          tool_use_id: "srv_1",
+          content: [{ type: "web_search_result", url: "https://www.insee.fr/a", title: "INSEE — chômage" }],
+        },
+        serverUse("srv_dangling"),
+      ],
     }),
     jsonResponse(200, {
       content: [submit({ ...VALID, sources: [{ url: "https://www.insee.fr/a", description: "Réelle" }] })],
@@ -357,15 +382,17 @@ test("recherche web : appel de secours forcé si le modèle ne finalise pas", as
 
   assert.equal(fetchFn.calls.length, 2);
   const second = fetchFn.calls[1].body;
-  assert.deepEqual(second.tool_choice, { type: "tool", name: "submit_reality_check" });
+  assert.equal(second.tool_choice, undefined, "pas de tool_choice forcé");
   assert.deepEqual(second.tools.map((t) => t.name), ["submit_reality_check"]);
-  const assistant = second.messages[1];
-  assert.equal(assistant.role, "assistant");
-  assert.ok(!assistant.content.some((b) => b.id === "srv_dangling"), "server_tool_use orphelin retiré");
+  assert.equal(second.messages.length, 1, "l'historique (blocs de réflexion) n'est pas rejoué");
+  assert.equal(second.messages[0].role, "user");
+  assert.match(second.messages[0].content, /Appelle maintenant l'outil submit_reality_check/);
+  assert.match(second.messages[0].content, /- INSEE — chômage — https:\/\/www\.insee\.fr\/a/);
+  assert.match(second.messages[0].content, /texte B/);
   assert.equal(result.sources.length, 1);
 });
 
-test("sans recherche web : un appel forcé, aucune source", async () => {
+test("sans recherche web : un seul appel, aucune source", async () => {
   const fetchFn = fakeFetch([
     jsonResponse(200, {
       content: [submit({ ...VALID, sources: [{ url: "https://inventee.example", description: "x" }] })],
@@ -377,7 +404,7 @@ test("sans recherche web : un appel forcé, aucune source", async () => {
   assert.equal(fetchFn.calls.length, 1);
   const { body } = fetchFn.calls[0];
   assert.deepEqual(body.tools.map((t) => t.name), ["submit_reality_check"]);
-  assert.deepEqual(body.tool_choice, { type: "tool", name: "submit_reality_check" });
+  assert.equal(body.tool_choice, undefined);
   assert.deepEqual(plain(result.sources), []);
 });
 
@@ -397,12 +424,48 @@ test("au plus 3 procédés rhétoriques sont conservés", async () => {
   assert.equal(result.rhetorique.length, 3);
 });
 
-test("Haiku utilise l'outil de recherche basique", async () => {
-  const fetchFn = fakeFetch([jsonResponse(200, { content: [submit(VALID)] })]);
-  const ctx = loadContext(fetchFn);
-  await get(ctx, "callAnthropic")("clé", ctxOf("texte D"), { model: "claude-haiku-4-5" });
-  assert.equal(fetchFn.calls[0].body.model, "claude-haiku-4-5");
-  assert.equal(fetchFn.calls[0].body.tools[0].type, "web_search_20250305");
+test("les quatre modèles 5.x sont proposés, avec le bon outil de recherche", async () => {
+  const ctx = loadContext(async () => {});
+  assert.deepEqual(plain(get(ctx, "MODELS.map((m) => m.id)")), [
+    "claude-haiku-5-5",
+    "claude-sonnet-5-5",
+    "claude-opus-5-5",
+    "claude-fable-5-1",
+  ]);
+  const toolType = (model) => get(ctx, `getWebSearchTool("${model}").type`);
+  assert.equal(toolType("claude-sonnet-5-5"), "web_search_20260209");
+  assert.equal(toolType("claude-opus-5-5"), "web_search_20260209");
+  assert.equal(toolType("claude-haiku-5-5"), "web_search_20250305");
+  assert.equal(toolType("claude-fable-5-1"), "web_search_20250305");
+
+  for (const model of ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1"]) {
+    const fetchFn = fakeFetch([jsonResponse(200, { content: [submit(VALID)] })]);
+    await get(loadContext(fetchFn), "callAnthropic")("clé", ctxOf("texte " + model), { model });
+    assert.equal(fetchFn.calls[0].body.model, model);
+    assert.equal(fetchFn.calls[0].body.tool_choice, undefined);
+  }
+});
+
+test("normalizeModel migre les anciens réglages et refuse les valeurs inconnues", () => {
+  const ctx = loadContext(async () => {});
+  const norm = get(ctx, "normalizeModel");
+  assert.equal(get(ctx, "DEFAULT_MODEL"), "claude-sonnet-5-5");
+  assert.equal(norm("claude-sonnet-5"), "claude-sonnet-5-5");
+  assert.equal(norm("claude-haiku-4-5"), "claude-haiku-5-5");
+  assert.equal(norm("claude-opus-5"), "claude-opus-5-5");
+  assert.equal(norm("claude-fable-5"), "claude-fable-5-1");
+  assert.equal(norm("claude-opus-5-5"), "claude-opus-5-5");
+  assert.equal(norm("gpt-n'importe-quoi"), "claude-sonnet-5-5");
+  assert.equal(norm(undefined), "claude-sonnet-5-5");
+});
+
+test("un refus du modèle (stop_reason refusal) donne un message clair", async () => {
+  const fetchFn = fakeFetch([jsonResponse(200, { stop_reason: "refusal", stop_details: { category: "general_harms" }, content: [] })]);
+  await assert.rejects(
+    get(loadContext(fetchFn), "callAnthropic")("clé", ctxOf("texte refus"), { webSearch: false }),
+    /refusé d'analyser ce contenu/
+  );
+  assert.equal(fetchFn.calls.length, 1);
 });
 
 test("le cache évite un second appel identique, sauf demande de nouvelle analyse", async () => {
@@ -450,7 +513,10 @@ test("erreurs API : messages explicites", async () => {
     /Clé API Anthropic invalide/
   );
 
-  const noTool = fakeFetch([jsonResponse(200, { content: [{ type: "text", text: "bonjour" }] })]);
+  const noTool = fakeFetch([
+    jsonResponse(200, { content: [{ type: "text", text: "bonjour" }] }),
+    jsonResponse(200, { content: [{ type: "text", text: "toujours pas d'outil" }] }),
+  ]);
   await assert.rejects(
     get(loadContext(noTool), "callAnthropic")("clé", ctxOf("t3"), { webSearch: false }),
     /analyse structurée/

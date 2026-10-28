@@ -65,7 +65,7 @@ async function getSettings() {
   });
   return {
     apiKey: String(stored.anthropicApiKey || "").trim(),
-    model: stored.model || DEFAULT_MODEL,
+    model: normalizeModel(stored.model),
     webSearch: stored.webSearch !== false,
     reply: stored.reply !== false,
     replyStyle: stored.replyStyle === "detaille" ? "detaille" : "court",
