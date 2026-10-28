@@ -88,8 +88,7 @@ personnes d'après leur visage est interdite par le prompt.
    modèle l'outil `web_search` (une seule recherche, pour garder l'analyse
    rapide) et l'outil `submit_reality_check` : il cherche puis renvoie sa
    sortie structurée dans la même réponse. Si le modèle s'arrête après la
-   recherche sans finaliser, un second appel de secours force l'outil
-   (`tool_choice`).
+   recherche sans finaliser, un second appel de secours le lui redemande.
 3. Le résultat est **contrôlé** avant affichage : sources conservées
    uniquement si l'URL a réellement été renvoyée par la recherche web
    (3 au maximum, `http(s)` seulement) ; citations de sophismes conservées
@@ -124,7 +123,7 @@ publication. Longueur courte (280 caractères) ou détaillée (700) au choix.
 
 | Réglage | Effet |
 | --- | --- |
-| Modèle | **Claude Sonnet 5** (plus précis, par défaut) ou **Claude Haiku 4.5** (plus rapide, moins coûteux). |
+| Modèle | **Claude Haiku 5.5** (le plus rapide et le moins cher), **Claude Sonnet 5.5** (équilibré, par défaut), **Claude Opus 5.5** (plus approfondi) ou **Claude Fable 5.1** (le plus capable, mais le plus coûteux et le plus lent). Les anciens choix enregistrés (Sonnet 5, Haiku 4.5...) sont migrés automatiquement. |
 | Recherche web | Activée : sources vérifiées, quelques secondes de plus et un coût par recherche (voir la tarification de `web_search` sur [platform.claude.com](https://platform.claude.com)). Désactivée : un seul appel direct, nettement plus rapide, sans source. |
 | Images, vidéo et sous-titres | Joindre ou non le contexte multimédia (plus de jetons, donc plus lent et plus coûteux). |
 | Réponse suggérée | Activer ou non, et choisir sa longueur. |
@@ -349,12 +348,12 @@ Prérequis : Node 20 ou plus récent. Aucune dépendance à installer.
 make test    # ou : node --test test/*.test.js
 ```
 
-La suite (34 tests) couvre, sans appel réseau (`fetch` est simulé) :
+La suite (36 tests) couvre, sans appel réseau (`fetch` est simulé) :
 cohérence du catalogue de sophismes entre schéma, prompt et validation ;
 validation de la sortie du modèle ; vérification des citations et des
 sources ; nettoyage de la réponse suggérée ; envoi des images, de la capture
 vidéo et des sous-titres ; nouvel essai sans images si l'API ne peut pas les
-télécharger ; flux en un appel et appel de secours ; mode sans recherche ;
+télécharger ; flux en un appel et requête de secours autonome ; jamais de `tool_choice` forcé ; mode sans recherche ; refus du modèle ; migration des anciens modèles ;
 choix de l'outil de recherche selon le modèle ; cache ; annulation ;
 nouvelle tentative sur erreur transitoire (429/5xx/529) ; test de la clé ;
 extraction des sous-titres (WebVTT, YouTube) et choix des images ;

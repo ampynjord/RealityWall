@@ -8,14 +8,33 @@
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
-const DEFAULT_MODEL = "claude-sonnet-5";
+// Modèles proposés. `dynamicSearch` : web_search_20260209 (filtrage dynamique)
+// est documenté pour Sonnet 5.5 et Opus 5.5 ; les autres utilisent la
+// version basique, disponible partout.
+const MODELS = [
+  { id: "claude-haiku-5-5", dynamicSearch: false },
+  { id: "claude-sonnet-5-5", dynamicSearch: true },
+  { id: "claude-opus-5-5", dynamicSearch: true },
+  { id: "claude-fable-5-1", dynamicSearch: false },
+];
+const DEFAULT_MODEL = "claude-sonnet-5-5";
+// Anciens identifiants enregistrés dans les réglages -> génération actuelle.
+const LEGACY_MODELS = {
+  "claude-haiku-4-5": "claude-haiku-5-5",
+  "claude-sonnet-5": "claude-sonnet-5-5",
+  "claude-opus-5": "claude-opus-5-5",
+  "claude-fable-5": "claude-fable-5-1",
+};
+// Ces modèles réfléchissent toujours : `effort` règle le compromis
+// vitesse / profondeur (les jetons de réflexion comptent dans max_tokens).
+const ANALYSIS_EFFORT = "medium";
 const MAX_INPUT_CHARS = 4000;
 const MAX_CAPTION_CHARS = 3000;
 const MAX_DESCRIPTION_CHARS = 500;
 const MAX_IMAGES = 3;
 const MAX_FRAME_BASE64_CHARS = 1500000;
-const MAX_COMBINED_TOKENS = 3072;
-const MAX_OUTPUT_TOKENS = 1536;
+const MAX_COMBINED_TOKENS = 12000;
+const MAX_OUTPUT_TOKENS = 8000;
 const MAX_SOURCES = 3;
 const MAX_RHETORIQUE = 3;
 const MAX_REPLY_CHARS = 800;
@@ -121,35 +140,6 @@ function extractToolInput(responseBody) {
   return input;
 }
 
-/**
- * web_search applique un filtrage dynamique qui exécute du code en
- * interne (code_execution) : un bloc server_tool_use doit toujours être
- * suivi de son bloc *_tool_result. Si la réponse est tronquée par
- * max_tokens en plein milieu d'un cycle de recherche, ce n'est pas
- * garanti — on retire alors les appels d'outil sans résultat avant de les
- * renvoyer, sous peine de 400 au tour suivant ("tool use ... was found
- * without a corresponding tool_result block").
- *
- * Les résultats d'outils serveur suivent tous la convention de nommage
- * `*_tool_result` (web_search_tool_result, code_execution_tool_result,
- * mcp_tool_result...) : on détecte par suffixe plutôt que par une liste
- * fermée de types, pour rester valide si Anthropic ajoute un nouveau type
- * d'outil serveur.
- */
-function stripDanglingServerToolUse(content) {
-  if (!Array.isArray(content)) {
-    return content;
-  }
-  const resultIds = new Set(
-    content
-      .filter((block) => typeof block?.type === "string" && block.type.endsWith("_tool_result") && block.tool_use_id)
-      .map((block) => block.tool_use_id)
-  );
-  return content.filter(
-    (block) => !(block?.type === "server_tool_use" && !resultIds.has(block.id))
-  );
-}
-
 /** Vrai pour une URL http(s) bien formée (refuse javascript:, data:, etc.). */
 function isSafeHttpUrl(value) {
   if (typeof value !== "string") {
@@ -227,9 +217,50 @@ function sanitizeSources(sources, allowedUrls) {
   return kept;
 }
 
-/** web_search_20260209 (filtrage dynamique) n'existe pas sur Haiku. */
+/** Identifiant de modèle valide (migre les anciens réglages, défaut sinon). */
+function normalizeModel(id) {
+  const mapped = LEGACY_MODELS[id] || id;
+  return MODELS.some((model) => model.id === mapped) ? mapped : DEFAULT_MODEL;
+}
+
 function getWebSearchTool(model) {
-  return /haiku/i.test(model) ? WEB_SEARCH_TOOL_BASIC : WEB_SEARCH_TOOL;
+  const known = MODELS.find((entry) => entry.id === model);
+  return known && known.dynamicSearch ? WEB_SEARCH_TOOL : WEB_SEARCH_TOOL_BASIC;
+}
+
+/** Résultats de recherche web d'une réponse ({ url, title }), 8 au plus. */
+function collectSearchResults(content) {
+  const results = [];
+  const seen = new Set();
+  for (const block of Array.isArray(content) ? content : []) {
+    if (block?.type !== "web_search_tool_result" || !Array.isArray(block.content)) {
+      continue;
+    }
+    for (const result of block.content) {
+      if (!isSafeHttpUrl(result?.url) || seen.has(normalizeUrl(result.url))) {
+        continue;
+      }
+      seen.add(normalizeUrl(result.url));
+      results.push({ url: result.url.trim(), title: String(result.title || "").trim() });
+    }
+  }
+  return results.slice(0, 8);
+}
+
+/** Refus du modèle (filtres de sécurité) : HTTP 200 mais stop_reason "refusal". */
+function checkStopReason(body) {
+  if (body && body.stop_reason === "refusal") {
+    throw new Error(
+      "Le modèle a refusé d'analyser ce contenu (filtre de sécurité). Essayez un autre modèle dans les réglages."
+    );
+  }
+}
+
+/** Ajoute un texte au contenu d'un message (chaîne ou liste de blocs). */
+function appendText(content, text) {
+  return typeof content === "string"
+    ? `${content}\n\n${text}`
+    : [...content, { type: "text", text }];
 }
 
 /** Coupe un texte à `max` caractères (sans casser la limite d'entrée de l'API). */
@@ -444,67 +475,54 @@ function cacheSet(key, value) {
 
 /** Un ou deux appels API pour un contexte donné (voir callAnthropic). */
 async function requestAnalysis(apiKey, context, options) {
-  const model = options.model || DEFAULT_MODEL;
+  const model = normalizeModel(options.model);
   const webSearch = options.webSearch !== false;
   const reply = { enabled: options.reply !== false, style: options.replyStyle };
-  const messages = [{ role: "user", content: buildUserContent(context, webSearch, reply) }];
+  const content = buildUserContent(context, webSearch, reply);
+  const base = { model, system: SYSTEM_PROMPT, output_config: { effort: ANALYSIS_EFFORT } };
 
-  if (!webSearch) {
-    const body = await postMessages(
-      apiKey,
-      {
-        model,
-        max_tokens: MAX_OUTPUT_TOKENS,
-        system: SYSTEM_PROMPT,
-        tools: [REALITY_CHECK_TOOL],
-        tool_choice: { type: "tool", name: TOOL_NAME },
-        messages,
-      },
-      options.signal
-    );
-    const result = validateRealityCheckResult(extractToolInput(body));
-    result.sources = [];
-    return result;
-  }
-
-  const combinedBody = await postMessages(
+  // tool_choice reste "auto" : forcer un outil est refusé (400) par
+  // Sonnet 5.5, Opus 5.5 et Fable 5.1. Le prompt demande l'appel de l'outil.
+  const first = await postMessages(
     apiKey,
     {
-      model,
-      max_tokens: MAX_COMBINED_TOKENS,
-      system: SYSTEM_PROMPT,
-      tools: [getWebSearchTool(model), REALITY_CHECK_TOOL],
-      messages,
+      ...base,
+      max_tokens: webSearch ? MAX_COMBINED_TOKENS : MAX_OUTPUT_TOKENS,
+      tools: webSearch ? [getWebSearchTool(model), REALITY_CHECK_TOOL] : [REALITY_CHECK_TOOL],
+      messages: [{ role: "user", content }],
     },
     options.signal
   );
-  const searchedUrls = collectSearchUrls(combinedBody.content);
+  checkStopReason(first);
+  const searchedUrls = webSearch ? collectSearchUrls(first.content) : new Set();
 
-  let toolInput = tryExtractToolInput(combinedBody);
+  let toolInput = tryExtractToolInput(first);
   if (toolInput === null) {
-    messages.push({
-      role: "assistant",
-      content: stripDanglingServerToolUse(combinedBody.content),
-    });
-    messages.push({ role: "user", content: buildFinalizePrompt() });
-
-    const finalBody = await postMessages(
+    // Le modèle s'est arrêté sans finaliser (réponse tronquée, pause du tour
+    // serveur, texte libre...). Nouvelle requête autonome — l'historique de la
+    // première n'est pas rejoué (il contient des blocs de réflexion liés au
+    // tour qui les a produits) — qui rappelle les résultats de recherche.
+    const second = await postMessages(
       apiKey,
       {
-        model,
+        ...base,
         max_tokens: MAX_OUTPUT_TOKENS,
-        system: SYSTEM_PROMPT,
         tools: [REALITY_CHECK_TOOL],
-        tool_choice: { type: "tool", name: TOOL_NAME },
-        messages,
+        messages: [
+          {
+            role: "user",
+            content: appendText(content, buildFinalizePrompt(webSearch ? collectSearchResults(first.content) : [])),
+          },
+        ],
       },
       options.signal
     );
-    toolInput = extractToolInput(finalBody);
+    checkStopReason(second);
+    toolInput = extractToolInput(second);
   }
 
   const result = validateRealityCheckResult(toolInput);
-  result.sources = sanitizeSources(result.sources, searchedUrls);
+  result.sources = webSearch ? sanitizeSources(result.sources, searchedUrls) : [];
   return result;
 }
 
@@ -516,8 +534,10 @@ async function requestAnalysis(apiKey, context, options) {
  * s'exécute et le modèle reprend sa génération dans la MÊME réponse HTTP.
  * Les deux outils sont donc proposés dès le premier appel (tool_choice
  * auto) pour qu'il cherche puis appelle submit_reality_check en un seul
- * aller-retour. Si le modèle s'arrête après la recherche sans finaliser, un
- * second appel de secours force l'appel de l'outil.
+ * aller-retour. Si le modèle s'arrête après la recherche sans finaliser, une
+ * seconde requête de secours (sans rejouer l'historique) lui redemande
+ * l'outil, avec les résultats de recherche. Jamais de tool_choice forcé :
+ * c'est refusé (400) par Sonnet 5.5, Opus 5.5 et Fable 5.1.
  *
  * Sans recherche web : un seul appel avec l'outil forcé (le plus rapide),
  * sans source.
@@ -541,7 +561,7 @@ async function callAnthropic(apiKey, rawContext, options = {}) {
   if (requestedImages.length > usableImages.length) {
     context.notes.push("Images ignorées : ce site interdit leur téléchargement par l'API.");
   }
-  const model = options.model || DEFAULT_MODEL;
+  const model = normalizeModel(options.model);
   const webSearch = options.webSearch !== false;
 
   const cacheKey = JSON.stringify([
