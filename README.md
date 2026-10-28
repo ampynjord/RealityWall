@@ -42,47 +42,93 @@ Installez l'extension, collez votre clé, c'est prêt (voir
 
 ## Fonctionnement
 
-Deux façons d'analyser un texte, et deux déclencheurs selon ce que votre
-navigateur permet :
+### Déclencher une analyse
 
-- **Analyser une sélection** — **Desktop (Chrome, Firefox)** : sélectionnez
-  un texte, clic droit → **Débunker avec RealityWall**. **Partout, y compris
-  Firefox pour Android** (qui ne supporte pas les menus contextuels) :
-  sélectionnez un texte puis touchez/cliquez l'icône RealityWall de la barre
-  d'outils.
-- **Analyser toute la page** — clic droit n'importe où (sans sélection) →
-  **Débunker toute la page avec RealityWall** ; ou cliquez l'icône de la
-  barre d'outils sans rien sélectionner au préalable.
+| Geste | Ce qui est analysé |
+| --- | --- |
+| Sélectionner un texte, puis cliquer sur le bouton **« Analyser avec RealityWall »** qui apparaît à côté | La sélection (un commentaire, un passage) |
+| Clic droit → **Débunker avec RealityWall** (desktop) | La sélection |
+| Clic sur l'icône de l'extension, ou raccourci **Alt + Maj + R** | La sélection s'il y en a une, sinon la page entière |
+| Clic droit → **Débunker toute la page avec RealityWall** | La publication entière et ses commentaires |
+| Clic droit sur une image ou une vidéo → **Débunker ce média** | Le média et le texte autour |
 
-Dans tous les cas, la suite est identique :
+Sur Firefox pour Android (sans menu contextuel) : sélectionnez un texte puis
+touchez le bouton flottant ou l'icône de l'extension.
 
-1. L'extension envoie le texte (sélection ou page entière, tronqué à 4000
-   caractères) **directement** à l'API Claude (Anthropic,
-   `api.anthropic.com`), authentifiée avec la clé API que vous avez
-   renseignée dans les réglages de l'extension.
+### Le contexte pris en compte
+
+Au-delà du texte, l'extension joint ce qui aide à comprendre le contenu
+(réglage « Tenir compte des images, de la vidéo et des sous-titres ») :
+
+- **Texte** de la sélection, ou de la zone principale de la page ; titre et
+  description de la page ;
+- **Images** de la publication (3 au maximum, hors avatars et icônes) ;
+- **Vidéo** : une capture de l'image affichée (qui contient aussi les
+  incrustations de texte) et les **sous-titres** quand ils existent
+  (pistes `<track>` ; sous-titres YouTube) ;
+- **Son** : il n'est **pas** analysé, faute de transcription. Le pop-up
+  l'indique (« le son de la vidéo n'a pas été analysé ») ; seuls les
+  sous-titres disponibles comptent.
+
+Le pop-up affiche toujours la liste de ce qui a été réellement envoyé
+(« Analysé : texte · 1 image · capture vidéo · sous-titres »). Les images
+sont envoyées par leur adresse publique ; si l'API ne peut pas les
+télécharger, l'analyse est refaite sans elles. L'identification de
+personnes d'après leur visage est interdite par le prompt.
+
+### Ce que fait l'analyse
+
+1. L'extension envoie ce contexte **directement** à l'API Claude (Anthropic,
+   `api.anthropic.com`), avec la clé API que vous avez renseignée dans les
+   réglages (texte tronqué à 4000 caractères).
 2. Avec la recherche web activée (par défaut), un seul appel donne au
-   modèle l'outil `web_search` intégré à l'API (une seule recherche, pour
-   garder l'analyse rapide) et l'outil `submit_reality_check` : il cherche
-   puis renvoie sa sortie structurée dans la même réponse. Si le modèle
-   s'arrête après la recherche sans finaliser, un second appel de secours
-   force l'outil (`tool_choice`).
-3. Les sources affichées sont **vérifiées** : seules les URLs réellement
-   renvoyées par la recherche web sont conservées (jamais une URL inventée
-   par le modèle), au maximum 3, et uniquement en `http(s)`.
-4. Une pop-up apparaît au niveau du curseur (ou en position par défaut sur
-   mobile) avec le verdict : **statut** factuel, **sophismes rhétoriques**
-   détectés, **contexte** manquant et **sources**, avec un lien direct vers
-   chacune, plus un rappel que l'analyse est automatique.
+   modèle l'outil `web_search` (une seule recherche, pour garder l'analyse
+   rapide) et l'outil `submit_reality_check` : il cherche puis renvoie sa
+   sortie structurée dans la même réponse. Si le modèle s'arrête après la
+   recherche sans finaliser, un second appel de secours force l'outil
+   (`tool_choice`).
+3. Le résultat est **contrôlé** avant affichage : sources conservées
+   uniquement si l'URL a réellement été renvoyée par la recherche web
+   (3 au maximum, `http(s)` seulement) ; citations de sophismes conservées
+   uniquement si elles figurent mot pour mot dans le contenu ; aucune URL
+   dans la réponse suggérée ; 3 procédés rhétoriques au plus.
+4. Un pop-up affiche, dans cet ordre : le **statut** et un **résumé** en une
+   phrase, la **réponse suggérée**, les **procédés rhétoriques** (avec la
+   citation exacte), le **contexte** manquant et les **sources**.
 
-**Réglages** (page d'options de l'extension) :
+### La réponse suggérée
+
+Pour répondre à une publication ou à un commentaire, le pop-up propose un
+message prêt à copier : pragmatique, courtois, factuel, dans la langue du
+texte analysé, sans sarcasme ni prise de parti. Il s'appuie uniquement sur
+les sources vérifiées (le lien vérifié est ajouté à la copie, décochable) et
+reste vide quand il n'y a rien de factuel à répondre. Vous pouvez le
+modifier avant de le copier. Sélectionner un commentaire prépare une réponse
+à ce commentaire ; analyser la page entière prépare une réponse à la
+publication. Longueur courte (280 caractères) ou détaillée (700) au choix.
+
+### Ergonomie
+
+- Pop-up **déplaçable**, **repliable**, qui tient dans la fenêtre, avec
+  thème clair/sombre automatique ;
+- résumé d'abord, détails dans des sections repliables ;
+- compteur de secondes pendant l'analyse, bouton **Annuler** (la requête
+  est réellement interrompue) et **Réanalyser** ;
+- **Échap** ferme le pop-up ; bouton « Tester » pour vérifier la clé API ;
+  la page de réglages s'ouvre à la première installation.
+
+### Réglages
 
 | Réglage | Effet |
 | --- | --- |
 | Modèle | **Claude Sonnet 5** (plus précis, par défaut) ou **Claude Haiku 4.5** (plus rapide, moins coûteux). |
 | Recherche web | Activée : sources vérifiées, quelques secondes de plus et un coût par recherche (voir la tarification de `web_search` sur [platform.claude.com](https://platform.claude.com)). Désactivée : un seul appel direct, nettement plus rapide, sans source. |
+| Images, vidéo et sous-titres | Joindre ou non le contexte multimédia (plus de jetons, donc plus lent et plus coûteux). |
+| Réponse suggérée | Activer ou non, et choisir sa longueur. |
+| Bouton flottant | Afficher ou non le bouton près d'une sélection. |
 
 Un cache en mémoire évite de refaire (et de payer) l'analyse d'un même
-texte avec les mêmes réglages.
+contenu avec les mêmes réglages ; « Réanalyser » le contourne.
 
 **Plateformes prises en charge** : Chrome/Edge/Brave desktop, Firefox
 desktop, Firefox pour Android. Chrome pour Android et iOS, ainsi que tous
@@ -96,10 +142,11 @@ possible côté extension).
 RealityWall/
 ├── extension/              Extension navigateur Manifest V3 (Chrome + Firefox)
 │   ├── manifest.json
-│   ├── prompts.js            Prompt système + schémas d'outils
-│   ├── core.js               Appel API Anthropic, validation, vérification des sources (testé)
-│   ├── background.js         Menu contextuel + icône barre d'outils + réglages
-│   ├── content.js             Overlay injecté sur la page (pop-up)
+│   ├── prompts.js            Catalogue de sophismes, prompt système, schémas d'outils
+│   ├── core.js               Appel API Anthropic, validation, vérification des sources et citations (testé)
+│   ├── context.js            Collecte du contexte : texte, images, capture vidéo, sous-titres (partiellement testé)
+│   ├── background.js         Menus, icône, raccourci, annulation, réglages
+│   ├── content.js             Interface injectée : pop-up, bouton flottant
 │   ├── content.css
 │   ├── options/                Page de réglages (clé API, modèle, recherche web)
 │   └── icons/
@@ -232,15 +279,27 @@ risque de sortie mal formée :
 ```
 
 - **`statut`** : `Vrai` · `Faux` · `Incomplet` · `Raccourci` · `Hors-sujet`.
-- **`rhetorique`** : liste des sophismes détectés parmi `Ad Hominem /
-  Association`, `Homme de Paille (Strawman)`, `Faux Dilemme`, `Diversion /
-  Esquive`. Liste vide si aucun n'est présent.
+- **`rhetorique`** : au plus 3 procédés, parmi 18 catégories (voir
+  ci-dessous), chacun avec la citation exacte du texte et son mécanisme.
+  Liste vide si rien n'est clairement présent : la précision prime sur
+  l'exhaustivité (une opinion, une ironie ou une comparaison argumentée ne
+  sont pas des sophismes).
 - **`contexte`** : détection du cherry-picking et des variables omises
   (inflation, période, population...).
 - **`sources`** : 0 à 3 sources réelles (URL + description), trouvées par
   le modèle via `web_search` parmi des sources primaires officielles
   (INSEE, Légifrance, Cour des comptes, Eurostat, rapports académiques...).
   Jamais une URL inventée : liste vide si aucune recherche n'aboutit.
+
+### Catalogue des procédés rhétoriques
+
+Ad Hominem / Association · Homme de Paille · Faux Dilemme · Diversion /
+Esquive · Pente Glissante · Généralisation Hâtive · Faux Lien de Causalité ·
+Appel à l'Autorité · Appel à la Popularité · Appel à l'Émotion · Tu Quoque /
+Whataboutism · Pétition de Principe · Question Tendancieuse · Argument
+Anecdotique · Fausse Équivalence · Empoisonnement du Puits · Procès
+d'Intention · Argument d'Ignorance. Le catalogue (noms et définitions) est
+défini une seule fois dans `extension/prompts.js`.
 
 Dans la pop-up, le code couleur est strict : **rouge** pour un sophisme
 rhétorique flagrant, **jaune** pour un manque de contexte, **vert** pour un
@@ -287,13 +346,22 @@ Prérequis : Node 20 ou plus récent. Aucune dépendance à installer.
 make test    # ou : node --test test/*.test.js
 ```
 
-La suite couvre, sans appel réseau (`fetch` est simulé) : la validation de
-la sortie du modèle, le retrait des blocs `server_tool_use` tronqués, le
-filtrage des sources sur les URLs réellement trouvées, le flux en un appel,
-l'appel de secours, le mode sans recherche, le choix de l'outil de recherche
-selon le modèle, le cache, les nouvelles tentatives sur erreur transitoire
-(429/5xx/529) et les messages d'erreur. Le pipeline CI exécute ces tests,
-vérifie la syntaxe des scripts et le manifest, puis empaquette l'extension.
+La suite (34 tests) couvre, sans appel réseau (`fetch` est simulé) :
+cohérence du catalogue de sophismes entre schéma, prompt et validation ;
+validation de la sortie du modèle ; vérification des citations et des
+sources ; nettoyage de la réponse suggérée ; envoi des images, de la capture
+vidéo et des sous-titres ; nouvel essai sans images si l'API ne peut pas les
+télécharger ; flux en un appel et appel de secours ; mode sans recherche ;
+choix de l'outil de recherche selon le modèle ; cache ; annulation ;
+nouvelle tentative sur erreur transitoire (429/5xx/529) ; test de la clé ;
+extraction des sous-titres (WebVTT, YouTube) et choix des images ;
+cohérence du manifest. Le pipeline CI exécute ces tests, vérifie la syntaxe
+des scripts et le manifest, puis empaquette l'extension.
+
+L'interface et la collecte dans le DOM (bouton flottant, pop-up, capture de
+vidéo, lecture des sous-titres, déplacement, copie, annulation) ne sont pas
+couvertes par la CI : elles se vérifient dans un navigateur réel, en
+chargeant le dossier `extension/`.
 
 Pour tester dans un navigateur : chargez le dossier `extension/` (voir
 [Charger l'extension dans le navigateur](#charger-lextension-dans-le-navigateur)).
