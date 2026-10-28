@@ -28,6 +28,9 @@
           <button type="button" id="toggle-key" class="rw-secondary">
             Afficher
           </button>
+          <button type="button" id="test-key" class="rw-secondary">
+            Tester
+          </button>
         </div>
 
         <label for="model">Modèle</label>
@@ -36,14 +39,46 @@
           <option value="claude-haiku-4-5">Claude Haiku 4.5 — plus rapide, moins coûteux</option>
         </select>
 
-        <label class="rw-check" for="web-search">
-          <input type="checkbox" id="web-search" name="web-search" checked />
-          Rechercher des sources sur le web (plus lent et facturé en plus)
-        </label>
-        <p class="rw-hint">
-          Sans recherche web, l'analyse est nettement plus rapide mais ne
-          fournit aucune source.
-        </p>
+        <fieldset>
+          <legend>Analyse</legend>
+          <label class="rw-check" for="web-search">
+            <input type="checkbox" id="web-search" name="web-search" checked />
+            Rechercher des sources sur le web (plus lent, facturé en plus)
+          </label>
+          <p class="rw-hint">
+            Sans recherche web, l'analyse est nettement plus rapide mais ne
+            fournit aucune source.
+          </p>
+          <label class="rw-check" for="use-media">
+            <input type="checkbox" id="use-media" name="use-media" checked />
+            Tenir compte des images, de la vidéo et des sous-titres
+          </label>
+          <p class="rw-hint">
+            Joint les images du message, une capture de la vidéo et ses
+            sous-titres quand ils existent. Le son n'est pas analysé.
+          </p>
+        </fieldset>
+
+        <fieldset>
+          <legend>Réponse suggérée</legend>
+          <label class="rw-check" for="reply">
+            <input type="checkbox" id="reply" name="reply" checked />
+            Proposer une réponse factuelle et sourcée à copier
+          </label>
+          <label for="reply-style">Longueur</label>
+          <select id="reply-style" name="reply-style">
+            <option value="court">Courte — 280 caractères, adaptée aux commentaires</option>
+            <option value="detaille">Détaillée — jusqu'à 700 caractères</option>
+          </select>
+        </fieldset>
+
+        <fieldset>
+          <legend>Confort</legend>
+          <label class="rw-check" for="selection-button">
+            <input type="checkbox" id="selection-button" name="selection-button" checked />
+            Afficher un bouton « Analyser » près du texte sélectionné
+          </label>
+        </fieldset>
 
         <button type="submit">Enregistrer</button>
       </form>
@@ -63,12 +98,17 @@
           <li>Collez-la ci-dessus et enregistrez.</li>
         </ol>
         <h2>Utilisation</h2>
-        <ol>
-          <li>Sélectionnez un texte sur n'importe quelle page web.</li>
-          <li>Clic droit → « Débunker avec RealityWall » (ou touchez l'icône de l'extension sur mobile).</li>
-        </ol>
+        <ul>
+          <li>Sélectionnez un texte (un commentaire, un passage) puis cliquez sur le bouton « Analyser » qui apparaît, ou faites un clic droit → « Débunker avec RealityWall ».</li>
+          <li>Sans sélection : cliquez sur l'icône de l'extension (ou clic droit → « toute la page ») pour analyser la publication entière.</li>
+          <li>Clic droit sur une image ou une vidéo → « Débunker ce média ».</li>
+          <li>Raccourci clavier : <kbd>Alt</kbd> + <kbd>Maj</kbd> + <kbd>R</kbd> (modifiable dans les raccourcis de votre navigateur).</li>
+          <li>Sur mobile (Firefox Android) : sélectionnez un texte puis touchez l'icône de l'extension.</li>
+        </ul>
       </section>
     </main>
+    <script src="../prompts.js"></script>
+    <script src="../core.js"></script>
     <script src="options.js"></script>
   </body>
 </html>

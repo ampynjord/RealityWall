@@ -1,12 +1,14 @@
 /**
  * Service worker RealityWall (Manifest V3, Chrome et Firefox).
  *
- * Gère deux déclencheurs équivalents :
- * - le menu contextuel "Débunker avec RealityWall" (clic droit, desktop
- *   uniquement : l'API contextMenus n'a pas d'équivalent tactile) ;
- * - un clic sur l'icône de la barre d'outils, qui analyse la sélection de
- *   texte courante. C'est le seul chemin utilisable sur Firefox pour
- *   Android, qui ne supporte pas contextMenus.
+ * Déclencheurs, tous équivalents (le contexte est collecté par le content
+ * script, qui renvoie ici un contexte complet à analyser) :
+ * - menus contextuels (clic droit, desktop uniquement) : sélection, page
+ *   entière, image ou vidéo ;
+ * - clic sur l'icône de la barre d'outils : sélection courante, sinon page
+ *   entière — seul chemin sur Firefox pour Android ;
+ * - raccourci clavier Alt+Maj+R ;
+ * - bouton flottant affiché près d'une sélection (content script).
  *
  * Appelle directement l'API Anthropic avec la clé fournie par
  * l'utilisateur dans la page de réglages (BYOK) : aucun backend
@@ -24,18 +26,33 @@ const api = typeof browser !== "undefined" ? browser : chrome;
 
 const MENU_ID = "reality-wall-debunk";
 const MENU_ID_PAGE = "reality-wall-debunk-page";
+const MENU_ID_MEDIA = "reality-wall-debunk-media";
 
-api.runtime.onInstalled.addListener(() => {
-  api.contextMenus.create({
-    id: MENU_ID,
-    title: "Débunker avec RealityWall",
-    contexts: ["selection"],
-  });
-  api.contextMenus.create({
-    id: MENU_ID_PAGE,
-    title: "Débunker toute la page avec RealityWall",
-    contexts: ["page"],
-  });
+// Analyses en cours, par onglet : permet d'annuler depuis la pop-up.
+const inflight = new Map();
+
+api.runtime.onInstalled.addListener((details) => {
+  if (api.contextMenus) {
+    api.contextMenus.create({
+      id: MENU_ID,
+      title: "Débunker avec RealityWall",
+      contexts: ["selection"],
+    });
+    api.contextMenus.create({
+      id: MENU_ID_MEDIA,
+      title: "Débunker ce média avec RealityWall",
+      contexts: ["image", "video"],
+    });
+    api.contextMenus.create({
+      id: MENU_ID_PAGE,
+      title: "Débunker toute la page avec RealityWall",
+      contexts: ["page"],
+    });
+  }
+  // Première installation : on guide vers la saisie de la clé.
+  if (details && details.reason === "install") {
+    api.runtime.openOptionsPage();
+  }
 });
 
 async function getSettings() {
@@ -43,11 +60,15 @@ async function getSettings() {
     anthropicApiKey: "",
     model: DEFAULT_MODEL,
     webSearch: true,
+    reply: true,
+    replyStyle: "court",
   });
   return {
     apiKey: String(stored.anthropicApiKey || "").trim(),
     model: stored.model || DEFAULT_MODEL,
     webSearch: stored.webSearch !== false,
+    reply: stored.reply !== false,
+    replyStyle: stored.replyStyle === "detaille" ? "detaille" : "court",
   };
 }
 
@@ -59,19 +80,46 @@ async function notifyContentScript(tabId, message) {
   }
 }
 
-async function analyzeAndNotify(text, tab) {
+/**
+ * S'assure que le content script est présent dans l'onglet (onglets
+ * ouverts avant l'installation de l'extension) en l'injectant au besoin.
+ */
+async function ensureContentScript(tabId) {
+  try {
+    await api.tabs.sendMessage(tabId, { type: "REALITYWALL_PING" });
+    return true;
+  } catch (error) {
+    try {
+      await api.scripting.insertCSS({ target: { tabId }, files: ["content.css"] });
+      await api.scripting.executeScript({ target: { tabId }, files: ["context.js", "content.js"] });
+      return true;
+    } catch (injectError) {
+      console.warn("RealityWall: page inaccessible à l'extension.", injectError);
+      return false;
+    }
+  }
+}
+
+async function startOnTab(tab, mode, extra = {}) {
   if (!tab || typeof tab.id !== "number") {
     return;
   }
-
-  const cleaned = text.trim();
-  if (!cleaned) {
+  if (!(await ensureContentScript(tab.id))) {
     return;
   }
+  await notifyContentScript(tab.id, { type: "REALITYWALL_START", mode, ...extra });
+}
 
-  const { apiKey, model, webSearch } = await getSettings();
-  if (!apiKey) {
-    await notifyContentScript(tab.id, {
+/** Analyse un contexte collecté par le content script et affiche le verdict. */
+async function runAnalysis(context, tab, fresh) {
+  if (!tab || typeof tab.id !== "number" || !context || typeof context !== "object") {
+    return;
+  }
+  const tabId = tab.id;
+
+  const settings = await getSettings();
+  if (!settings.apiKey) {
+    await notifyContentScript(tabId, {
       type: "REALITYWALL_ERROR",
       message:
         "Aucune clé API Anthropic configurée. Ouvrez les réglages de l'extension pour en renseigner une.",
@@ -80,74 +128,87 @@ async function analyzeAndNotify(text, tab) {
     return;
   }
 
-  await notifyContentScript(tab.id, { type: "REALITYWALL_LOADING" });
-
-  const truncated = cleaned.length > MAX_INPUT_CHARS ? cleaned.slice(0, MAX_INPUT_CHARS) : cleaned;
-
-  try {
-    const result = await callAnthropic(apiKey, truncated, tab.url || null, { model, webSearch });
-    await notifyContentScript(tab.id, { type: "REALITYWALL_RESULT", payload: result });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await notifyContentScript(tab.id, { type: "REALITYWALL_ERROR", message });
+  const previous = inflight.get(tabId);
+  if (previous) {
+    previous.abort();
   }
-}
+  const controller = new AbortController();
+  inflight.set(tabId, controller);
 
-async function getSelectionText(tabId) {
   try {
-    const results = await api.scripting.executeScript({
-      target: { tabId },
-      func: () => window.getSelection?.().toString() ?? "",
+    const result = await callAnthropic(settings.apiKey, context, {
+      model: settings.model,
+      webSearch: settings.webSearch,
+      reply: settings.reply,
+      replyStyle: settings.replyStyle,
+      fresh: Boolean(fresh),
+      signal: controller.signal,
     });
-    return results?.[0]?.result || "";
+    if (inflight.get(tabId) === controller) {
+      await notifyContentScript(tabId, { type: "REALITYWALL_RESULT", payload: result });
+    }
   } catch (error) {
-    console.warn("RealityWall: impossible de lire la sélection de la page.", error);
-    return "";
-  }
-}
-
-async function getPageText(tabId) {
-  try {
-    const results = await api.scripting.executeScript({
-      target: { tabId },
-      func: () => document.body?.innerText ?? "",
-    });
-    return results?.[0]?.result || "";
-  } catch (error) {
-    console.warn("RealityWall: impossible de lire le contenu de la page.", error);
-    return "";
-  }
-}
-
-api.contextMenus.onClicked.addListener(async (info, tab) => {
-  if (info.menuItemId === MENU_ID) {
-    await analyzeAndNotify(info.selectionText || "", tab);
-    return;
-  }
-  if (info.menuItemId === MENU_ID_PAGE) {
-    if (!tab || typeof tab.id !== "number") {
+    if (error && error.name === "AbortError") {
       return;
     }
-    const pageText = await getPageText(tab.id);
-    await analyzeAndNotify(pageText, tab);
+    const message = error instanceof Error ? error.message : String(error);
+    await notifyContentScript(tabId, { type: "REALITYWALL_ERROR", message });
+  } finally {
+    if (inflight.get(tabId) === controller) {
+      inflight.delete(tabId);
+    }
+  }
+}
+
+api.runtime.onMessage.addListener((message, sender) => {
+  if (!message || typeof message.type !== "string") {
+    return;
+  }
+  if (message.type === "REALITYWALL_ANALYZE") {
+    // Un seul expéditeur légitime : le content script de l'extension.
+    if (sender && sender.id === api.runtime.id && sender.tab) {
+      runAnalysis(message.context, sender.tab, message.fresh);
+    }
+  } else if (message.type === "REALITYWALL_CANCEL") {
+    const controller = sender && sender.tab ? inflight.get(sender.tab.id) : null;
+    if (controller) {
+      controller.abort();
+      inflight.delete(sender.tab.id);
+    }
+  } else if (message.type === "REALITYWALL_OPEN_OPTIONS") {
+    api.runtime.openOptionsPage();
   }
 });
+
+if (api.contextMenus) {
+  api.contextMenus.onClicked.addListener(async (info, tab) => {
+    if (info.menuItemId === MENU_ID) {
+      await startOnTab(tab, "selection");
+    } else if (info.menuItemId === MENU_ID_PAGE) {
+      await startOnTab(tab, "page");
+    } else if (info.menuItemId === MENU_ID_MEDIA) {
+      await startOnTab(tab, "media", { srcUrl: info.srcUrl });
+    }
+  });
+}
 
 // Clic sur l'icône de la barre d'outils : analyse la sélection en cours sur
 // la page si elle existe, sinon la page entière. Seul déclencheur
 // disponible là où contextMenus n'existe pas (Firefox pour Android).
-// Fonctionne aussi sur desktop, en complément du clic droit.
 api.action.onClicked.addListener(async (tab) => {
-  if (!tab || typeof tab.id !== "number") {
-    return;
-  }
-
-  const selectionText = await getSelectionText(tab.id);
-  if (selectionText.trim()) {
-    await analyzeAndNotify(selectionText, tab);
-    return;
-  }
-
-  const pageText = await getPageText(tab.id);
-  await analyzeAndNotify(pageText, tab);
+  await startOnTab(tab, "auto");
 });
+
+// Raccourci clavier (Alt+Maj+R par défaut, modifiable par l'utilisateur).
+if (api.commands && api.commands.onCommand) {
+  api.commands.onCommand.addListener(async (command, tab) => {
+    if (command !== "analyze") {
+      return;
+    }
+    let target = tab;
+    if (!target || typeof target.id !== "number") {
+      [target] = await api.tabs.query({ active: true, currentWindow: true });
+    }
+    await startOnTab(target, "auto");
+  });
+}
