@@ -131,3 +131,29 @@ code {
   font-size: 13px;
   line-height: 1.6;
 }
+
+.rw-options select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font: inherit;
+  background: #ffffff;
+  color: inherit;
+}
+
+.rw-options .rw-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.rw-options .rw-hint {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+}
