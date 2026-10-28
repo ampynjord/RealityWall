@@ -73,7 +73,10 @@ Au-delà du texte, l'extension joint ce qui aide à comprendre le contenu
 Le pop-up affiche toujours la liste de ce qui a été réellement envoyé
 (« Analysé : texte · 1 image · capture vidéo · sous-titres »). Les images
 sont envoyées par leur adresse publique ; si l'API ne peut pas les
-télécharger, l'analyse est refaite sans elles. L'identification de
+télécharger (accès protégé, ou site qui l'interdit par son `robots.txt`,
+comme beaucoup de réseaux sociaux), l'analyse est refaite sans elles et ce
+site est ignoré ensuite. La capture de la vidéo, elle, est envoyée
+directement et n'est pas concernée. L'identification de
 personnes d'après leur visage est interdite par le prompt.
 
 ### Ce que fait l'analyse

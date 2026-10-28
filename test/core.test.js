@@ -334,6 +334,35 @@ test("si l'API ne peut pas télécharger une image, nouvel essai sans les images
   assert.match(result.meta.notes[0], /images de la page n'ont pas pu être téléchargées/);
 });
 
+test("robots.txt : analyse refaite sans les images, et le site est ensuite ignoré", async () => {
+  const robots = "This URL is disallowed by the website's robots.txt file.";
+  const fetchFn = fakeFetch([
+    jsonResponse(400, { error: { message: robots } }),
+    jsonResponse(200, { content: [submit(VALID)] }),
+    jsonResponse(200, { content: [submit(VALID)] }),
+  ]);
+  const ctx = loadContext(fetchFn);
+  const call = get(ctx, "callAnthropic");
+  const first = await call(
+    "clé",
+    ctxOf("Premier", { images: ["https://scontent.cdn.example/a.jpg"], frame: "data:image/jpeg;base64,AAAA" }),
+    { webSearch: false }
+  );
+  assert.equal(fetchFn.calls.length, 2);
+  assert.match(first.meta.notes[0], /site qui les interdit/);
+
+  // Même site, autre analyse : l'image n'est même plus envoyée (pas d'aller-retour perdu).
+  const second = await call(
+    "clé",
+    ctxOf("Second", { images: ["https://scontent.cdn.example/b.jpg", "https://autre.example/c.jpg"] }),
+    { webSearch: false }
+  );
+  assert.equal(fetchFn.calls.length, 3);
+  const urls = fetchFn.calls[2].body.messages[0].content.filter((b) => b.type === "image").map((b) => b.source.url);
+  assert.deepEqual(urls, ["https://autre.example/c.jpg"]);
+  assert.match(second.meta.notes[0], /Images ignorées/);
+});
+
 test("une erreur 400 sans rapport avec les images n'est pas retentée", async () => {
   const fetchFn = fakeFetch([jsonResponse(400, { error: { message: "max_tokens too large" } })]);
   await assert.rejects(
