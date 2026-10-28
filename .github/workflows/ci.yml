@@ -9,20 +9,17 @@ on:
 
 jobs:
   test:
-    name: Tests backend
+    name: Tests de l'extension
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.11"
-
-      - name: Installer les dépendances
-        run: pip install -r backend/requirements-dev.txt
+          node-version: "22"
 
       - name: Lancer la suite de tests
-        run: pytest -v
+        run: node --test test/*.test.js
 
   package:
     name: Empaqueter l'extension
@@ -37,7 +34,7 @@ jobs:
         run: python3 -c "import json; json.load(open('extension/manifest.json'))"
 
       - name: Vérifier la syntaxe des scripts de l'extension
-        run: node -c extension/prompts.js && node -c extension/background.js && node -c extension/content.js && node -c extension/options/options.js
+        run: for f in extension/prompts.js extension/core.js extension/background.js extension/content.js extension/options/options.js; do node -c "$f"; done
 
       - name: Lire la version de l'extension
         id: version
@@ -109,52 +106,3 @@ jobs:
               --title "RealityWall extension v${VERSION}" \
               --notes "$NOTES"
           fi
-
-  deploy:
-    name: Déployer le backend sur le VPS (optionnel)
-    needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Vérifier si le déploiement VPS est configuré
-        id: check
-        env:
-          SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
-          SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
-          SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
-          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-        run: |
-          if [ -n "$SSH_HOST" ] && [ -n "$SSH_PORT" ] && [ -n "$SSH_USER" ] \
-             && [ -n "$SSH_KEY" ] && [ -n "$SSH_KNOWN_HOSTS" ] && [ -n "$DEPLOY_PATH" ]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Déploiement VPS ignoré : au moins un des secrets DEPLOY_SSH_HOST/PORT/USER/KEY/KNOWN_HOSTS ou DEPLOY_PATH n'est pas configuré. Le backend est optionnel depuis le passage en BYOK (voir README), l'extension ne dépend pas de ce déploiement."
-          fi
-
-      - name: Configurer l'accès SSH
-        if: steps.check.outputs.configured == 'true'
-        env:
-          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
-
-      - name: git pull + docker compose up -d --build sur le VPS
-        if: steps.check.outputs.configured == 'true'
-        env:
-          SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
-          SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
-          SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-        run: |
-          set -euo pipefail
-          ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" \
-            "cd '$DEPLOY_PATH' && git fetch origin main && git reset --hard origin/main && docker compose up -d --build"

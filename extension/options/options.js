@@ -1,6 +1,7 @@
 /**
  * Logique de la page de réglages : stockage local de la clé API
- * Anthropic fournie par l'utilisateur (BYOK). La clé n'est jamais
+ * Anthropic fournie par l'utilisateur (BYOK), choix du modèle et de la
+ * recherche web. La clé n'est jamais
  * synchronisée entre appareils (chrome.storage.local, pas .sync) et ne
  * transite que vers api.anthropic.com, jamais vers un tiers.
  */
@@ -9,6 +10,8 @@ const api = typeof browser !== "undefined" ? browser : chrome;
 
 const form = document.getElementById("options-form");
 const keyInput = document.getElementById("api-key");
+const modelSelect = document.getElementById("model");
+const webSearchInput = document.getElementById("web-search");
 const toggleButton = document.getElementById("toggle-key");
 const status = document.getElementById("status");
 
@@ -24,10 +27,14 @@ toggleButton.addEventListener("click", () => {
 });
 
 async function loadOptions() {
-  const { anthropicApiKey } = await api.storage.local.get({
+  const { anthropicApiKey, model, webSearch } = await api.storage.local.get({
     anthropicApiKey: "",
+    model: "claude-sonnet-5",
+    webSearch: true,
   });
   keyInput.value = anthropicApiKey;
+  modelSelect.value = model;
+  webSearchInput.checked = webSearch !== false;
 }
 
 form.addEventListener("submit", async (event) => {
@@ -39,7 +46,11 @@ form.addEventListener("submit", async (event) => {
     return;
   }
 
-  await api.storage.local.set({ anthropicApiKey: value });
+  await api.storage.local.set({
+    anthropicApiKey: value,
+    model: modelSelect.value,
+    webSearch: webSearchInput.checked,
+  });
   setStatus("Réglages enregistrés.");
 });
 
