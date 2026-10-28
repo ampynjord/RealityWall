@@ -105,8 +105,16 @@ Une fois tes recherches terminées, tu dois OBLIGATOIREMENT appeler l'outil \
 d'outil final. N'ajoute aucune formule de politesse, aucun avertissement, \
 aucune méta-explication.`;
 
+/** Version avec filtrage dynamique (Sonnet 5, Opus 4.6+). */
 const WEB_SEARCH_TOOL = {
   type: "web_search_20260209",
+  name: "web_search",
+  max_uses: 1,
+};
+
+/** Version basique, seule disponible sur les modèles plus petits (Haiku 4.5). */
+const WEB_SEARCH_TOOL_BASIC = {
+  type: "web_search_20250305",
   name: "web_search",
   max_uses: 1,
 };
@@ -198,7 +206,7 @@ const REALITY_CHECK_TOOL = {
 };
 
 /** Construit le message utilisateur envoyé au modèle. */
-function buildUserPrompt(text, sourceUrl) {
+function buildUserPrompt(text, sourceUrl, webSearch = true) {
   const lines = [
     "Texte à analyser (délimité par des balises <texte>) :",
     "<texte>",
@@ -212,8 +220,12 @@ function buildUserPrompt(text, sourceUrl) {
     );
   }
   lines.push(
-    "\nUtilise web_search si besoin, puis appelle l'outil " +
-      "submit_reality_check avec ton analyse structurée."
+    webSearch
+      ? "\nUtilise web_search si besoin, puis appelle l'outil " +
+          "submit_reality_check avec ton analyse structurée."
+      : "\nLa recherche web est désactivée : n'utilise aucune recherche, " +
+          "appelle directement l'outil submit_reality_check avec ton " +
+          "analyse structurée et une liste sources vide."
   );
   return lines.join("\n");
 }

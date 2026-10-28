@@ -1,21 +1,29 @@
-MIT License
+Copyright (c) 2026 ampynjord. Tous droits réservés.
+Copyright (c) 2026 ampynjord. All rights reserved.
 
-Copyright (c) 2026 ampynjord
+LICENCE PROPRIÉTAIRE / PROPRIETARY LICENSE
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Ce logiciel (code source, scripts, extension empaquetée, documentation et
+icônes) est la propriété exclusive de son titulaire. Aucune licence, expresse
+ou implicite, n'est accordée, sauf autorisation écrite préalable du titulaire.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Sans cette autorisation écrite, il est interdit de copier, modifier, fusionner,
+publier, distribuer, sous-licencier, vendre, reproduire ou créer des œuvres
+dérivées de ce logiciel, en tout ou en partie, sous quelque forme que ce soit.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+La consultation du code source sur GitHub, et l'installation et l'utilisation
+de l'extension pour un usage personnel avec sa propre clé API Anthropic, sont
+tolérées à titre précaire et révocable ; elles ne confèrent aucun droit sur le
+logiciel.
+
+LE LOGICIEL EST FOURNI « EN L'ÉTAT », SANS GARANTIE D'AUCUNE SORTE, EXPRESSE
+OU IMPLICITE. LE TITULAIRE NE SAURAIT ÊTRE TENU RESPONSABLE DES DOMMAGES
+RÉSULTANT DE SON UTILISATION, NI DES ERREURS DES ANALYSES PRODUITES PAR UN
+MODÈLE D'IA.
+
+This software (source code, scripts, packaged extension, documentation and
+icons) is the exclusive property of its owner. No license, express or implied,
+is granted without the owner's prior written permission. Copying, modifying,
+merging, publishing, distributing, sublicensing, selling or creating derivative
+works, in whole or in part, is prohibited without such permission. The software
+is provided "as is", without warranty of any kind.

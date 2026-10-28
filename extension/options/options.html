@@ -29,6 +29,22 @@
             Afficher
           </button>
         </div>
+
+        <label for="model">Modèle</label>
+        <select id="model" name="model">
+          <option value="claude-sonnet-5">Claude Sonnet 5 — plus précis</option>
+          <option value="claude-haiku-4-5">Claude Haiku 4.5 — plus rapide, moins coûteux</option>
+        </select>
+
+        <label class="rw-check" for="web-search">
+          <input type="checkbox" id="web-search" name="web-search" checked />
+          Rechercher des sources sur le web (plus lent et facturé en plus)
+        </label>
+        <p class="rw-hint">
+          Sans recherche web, l'analyse est nettement plus rapide mais ne
+          fournit aucune source.
+        </p>
+
         <button type="submit">Enregistrer</button>
       </form>
 
