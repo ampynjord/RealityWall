@@ -25,12 +25,7 @@ Anthropic ne voit votre texte ou votre clé : il n'y a aucun intermédiaire.
 Installez l'extension, collez votre clé, c'est prêt (voir
 [Démarrage rapide](#démarrage-rapide-moins-de-2-minutes)).
 
-Un backend Python auto-hébergeable existe toujours dans ce dépôt
-(`backend/`) pour qui voudrait faire tourner une instance partagée
-derrière sa propre clé — voir
-[Backend optionnel](#backend-optionnel-auto-hébergement-partagé) — mais ce
-n'est **pas** le chemin par défaut et l'extension ne s'y connecte plus
-automatiquement.
+**Logiciel propriétaire** — voir [Licence](#licence).
 
 ## Sommaire
 
@@ -42,8 +37,8 @@ automatiquement.
 - [Le moteur de qualification des faits](#le-moteur-de-qualification-des-faits)
 - [Sécurité](#sécurité)
 - [Dépannage](#dépannage)
-- [Backend optionnel (auto-hébergement partagé)](#backend-optionnel-auto-hébergement-partagé)
-- [Lancer les tests du backend](#lancer-les-tests-du-backend)
+- [Développement et tests](#développement-et-tests)
+- [Licence](#licence)
 
 ## Fonctionnement
 
@@ -65,24 +60,29 @@ Dans tous les cas, la suite est identique :
    caractères) **directement** à l'API Claude (Anthropic,
    `api.anthropic.com`), authentifiée avec la clé API que vous avez
    renseignée dans les réglages de l'extension.
-2. Un seul appel donne au modèle l'outil `web_search` intégré à l'API (une
-   seule recherche, pour garder l'analyse rapide) et l'outil
-   `submit_reality_check` : il cherche de vraies sources puis appelle
-   directement l'outil de sortie structurée dans la même réponse, sans
-   aller-retour réseau supplémentaire — le champ `sources` ne peut alors
-   contenir que des URLs réellement trouvées lors de la recherche, jamais
-   inventées. Dans le rare cas où le modèle s'arrête après la recherche sans
-   finaliser, un second appel de secours force l'utilisation de l'outil
-   (`tool_choice`) pour garantir une sortie structurée dans tous les cas.
-3. Une pop-up apparaît au niveau du curseur (ou en position par défaut sur
+2. Avec la recherche web activée (par défaut), un seul appel donne au
+   modèle l'outil `web_search` intégré à l'API (une seule recherche, pour
+   garder l'analyse rapide) et l'outil `submit_reality_check` : il cherche
+   puis renvoie sa sortie structurée dans la même réponse. Si le modèle
+   s'arrête après la recherche sans finaliser, un second appel de secours
+   force l'outil (`tool_choice`).
+3. Les sources affichées sont **vérifiées** : seules les URLs réellement
+   renvoyées par la recherche web sont conservées (jamais une URL inventée
+   par le modèle), au maximum 3, et uniquement en `http(s)`.
+4. Une pop-up apparaît au niveau du curseur (ou en position par défaut sur
    mobile) avec le verdict : **statut** factuel, **sophismes rhétoriques**
-   détectés, **contexte** manquant, et les **sources** trouvées, avec un
-   lien direct vers chacune.
+   détectés, **contexte** manquant et **sources**, avec un lien direct vers
+   chacune, plus un rappel que l'analyse est automatique.
 
-Le passage par une recherche web réelle rend l'analyse un peu plus lente
-qu'un simple appel (comptez quelques secondes de plus) et peut entraîner un
-coût par recherche en plus du coût habituel par token — voir la tarification
-de l'outil `web_search` sur [platform.claude.com](https://platform.claude.com).
+**Réglages** (page d'options de l'extension) :
+
+| Réglage | Effet |
+| --- | --- |
+| Modèle | **Claude Sonnet 5** (plus précis, par défaut) ou **Claude Haiku 4.5** (plus rapide, moins coûteux). |
+| Recherche web | Activée : sources vérifiées, quelques secondes de plus et un coût par recherche (voir la tarification de `web_search` sur [platform.claude.com](https://platform.claude.com)). Désactivée : un seul appel direct, nettement plus rapide, sans source. |
+
+Un cache en mémoire évite de refaire (et de payer) l'analyse d'un même
+texte avec les mêmes réglages.
 
 **Plateformes prises en charge** : Chrome/Edge/Brave desktop, Firefox
 desktop, Firefox pour Android. Chrome pour Android et iOS, ainsi que tous
@@ -96,24 +96,16 @@ possible côté extension).
 RealityWall/
 ├── extension/              Extension navigateur Manifest V3 (Chrome + Firefox)
 │   ├── manifest.json
-│   ├── prompts.js            Prompt système + schéma d'outil JSON strict
-│   ├── background.js         Menu contextuel + icône barre d'outils + appel API Anthropic direct
+│   ├── prompts.js            Prompt système + schémas d'outils
+│   ├── core.js               Appel API Anthropic, validation, vérification des sources (testé)
+│   ├── background.js         Menu contextuel + icône barre d'outils + réglages
 │   ├── content.js             Overlay injecté sur la page (pop-up)
 │   ├── content.css
-│   ├── options/                Page de réglages (clé API Anthropic, BYOK)
+│   ├── options/                Page de réglages (clé API, modèle, recherche web)
 │   └── icons/
-├── backend/                Backend Python optionnel (FastAPI + SDK Anthropic) — non utilisé par défaut
-│   ├── config.py
-│   ├── prompts.py             Même prompt/schéma que extension/prompts.js, version Python
-│   ├── schemas.py
-│   ├── engine.py
-│   ├── main.py                 Endpoints FastAPI /analyze et /health
-│   └── requirements*.txt
-├── tests/                  Suite de tests pytest (backend optionnel)
+├── test/                   Tests Node (node:test), sans réseau
 ├── scripts/generate_icons.py  Génération des icônes PNG (sans dépendance)
-├── .github/workflows/ci.yml  Tests + empaquetage extension + déploiement VPS (backend optionnel)
-├── backend/Dockerfile
-├── docker-compose.yml      Déploiement backend derrière Traefik (VPS, optionnel)
+├── .github/workflows/ci.yml  Tests + empaquetage + publication de l'extension
 └── Makefile
 ```
 
@@ -264,6 +256,7 @@ fait validé.
 - L'extension ne demande que la permission d'hôte `api.anthropic.com` (voir
   `host_permissions` dans `manifest.json`) : elle ne peut pas contacter
   d'autre domaine.
+- Les liens de sources n'utilisent que http(s) ; le contenu affiché est échappé avant insertion dans la page.
 - Chaque utilisateur consomme son propre quota et paie son propre usage sur
   son compte Anthropic — il n'y a pas de clé partagée à protéger ni de
   facturation centralisée.
@@ -286,123 +279,27 @@ fait validé.
   `chrome://extensions` (ou `about:debugging` sur Firefox) après toute
   modification du code.
 
-## Backend optionnel (auto-hébergement partagé)
+## Développement et tests
 
-Ce dépôt contient toujours un backend Python (`backend/`) implémentant la
-même logique que `extension/prompts.js`, pensé pour qui voudrait exposer
-une instance partagée (équipe, communauté) derrière sa propre clé API
-plutôt que de demander à chaque utilisateur d'en fournir une. **Ce n'est
-pas le chemin par défaut** : l'extension publiée dans les releases parle
-directement à Anthropic (voir [Fonctionnement](#fonctionnement)) et ne
-pointe vers aucun backend.
-
-Pour l'utiliser, il faut faire tourner ce backend vous-même et adapter
-`extension/background.js` pour qu'il appelle votre instance au lieu de
-l'API Anthropic directement (le code n'inclut plus de champ d'URL de
-backend configurable dans les réglages depuis ce pivot BYOK).
-
-### Lancer le backend en local
-
-Prérequis : Python 3.11+ et une clé API Anthropic.
+Prérequis : Node 20 ou plus récent. Aucune dépendance à installer.
 
 ```bash
-git clone <url-du-dépôt> RealityWall
-cd RealityWall
-
-# 1. Installe l'environnement virtuel et les dépendances, crée .env
-make install
-
-# 2. Renseignez votre clé API dans .env
-$EDITOR .env   # ANTHROPIC_API_KEY=sk-ant-...
-
-# 3. Lancez la suite de tests (aucun appel réseau réel)
-make test
-
-# 4. Démarrez le backend
-make run
+make test    # ou : node --test test/*.test.js
 ```
 
-Le backend écoute par défaut sur `http://localhost:8000` et expose
-`POST /analyze` et `GET /health`.
+La suite couvre, sans appel réseau (`fetch` est simulé) : la validation de
+la sortie du modèle, le retrait des blocs `server_tool_use` tronqués, le
+filtrage des sources sur les URLs réellement trouvées, le flux en un appel,
+l'appel de secours, le mode sans recherche, le choix de l'outil de recherche
+selon le modèle, le cache, les nouvelles tentatives sur erreur transitoire
+(429/5xx/529) et les messages d'erreur. Le pipeline CI exécute ces tests,
+vérifie la syntaxe des scripts et le manifest, puis empaquette l'extension.
 
-### Configuration
+Pour tester dans un navigateur : chargez le dossier `extension/` (voir
+[Charger l'extension dans le navigateur](#charger-lextension-dans-le-navigateur)).
 
-| Variable             | Défaut                                  | Description                                    |
-| --------------------- | ---------------------------------------- | ---------------------------------------------- |
-| `ANTHROPIC_API_KEY`   | *(vide)*                                 | Clé API Anthropic, obligatoire.                |
-| `ANTHROPIC_MODEL`     | `claude-sonnet-5`                       | Modèle Claude utilisé pour l'analyse.          |
-| `ANTHROPIC_TEMPERATURE` | *(omis)*                               | Optionnel : certains modèles rejettent ce paramètre (déprécié côté API). Le déterminisme vient du `tool_choice` forcé, pas de la température. |
-| `HOST`                | `0.0.0.0`                                | Interface d'écoute d'uvicorn.                  |
-| `PORT`                | `8000`                                   | Port d'écoute d'uvicorn.                       |
-| `CORS_ORIGIN_REGEX`   | origines `chrome-extension://` / `moz-extension://` / `localhost` | Regex des origines HTTP autorisées. |
-| `MAX_INPUT_CHARS`     | `4000`                                   | Troncature du texte envoyé au modèle.          |
+## Licence
 
-### Déploiement en production (VPS + Docker + Traefik)
-
-Le job `deploy` de la CI (`.github/workflows/ci.yml`) reste disponible pour
-qui veut automatiser le déploiement de ce backend optionnel sur un VPS,
-derrière Traefik, à chaque push sur `main`.
-
-1. **DNS** : créez un enregistrement (A ou AAAA) pointant votre domaine
-   vers l'IP du VPS.
-2. **Sur le VPS**, clonez le dépôt et préparez `.env` :
-   ```bash
-   git clone https://github.com/ampynjord/RealityWall.git
-   cd RealityWall
-   cp .env.example .env
-   $EDITOR .env   # ANTHROPIC_API_KEY=sk-ant-...
-   ```
-3. **Premier démarrage manuel**, pour vérifier que Traefik route correctement
-   avant d'activer le déploiement automatique :
-   ```bash
-   docker compose up -d --build
-   docker compose logs -f
-   ```
-   Le réseau Docker externe utilisé par Traefik doit s'appeler `traefik` et
-   le certresolver `letsencrypt` par défaut ; sinon, adaptez `TRAEFIK_NETWORK`
-   et `TRAEFIK_CERTRESOLVER` dans `.env` (voir `docker-compose.yml`, valeurs
-   interpolées depuis l'environnement, avec ces deux noms comme défauts).
-4. Vérifiez `https://votre-domaine/health` → `{"status":"ok"}`.
-
-Pour activer le déploiement automatique, ajoutez ces secrets dans les
-réglages du dépôt GitHub (**Settings → Secrets and variables → Actions**) :
-
-| Secret            | Valeur                                              |
-| ------------------ | ---------------------------------------------------- |
-| `DEPLOY_SSH_HOST`  | Adresse du VPS                                       |
-| `DEPLOY_SSH_PORT`  | Port SSH du VPS                                      |
-| `DEPLOY_SSH_USER`  | Utilisateur SSH                                      |
-| `DEPLOY_SSH_KEY`   | Clé privée SSH (format PEM) autorisée sur le VPS pour cet utilisateur |
-| `DEPLOY_SSH_KNOWN_HOSTS` | Empreinte(s) de l'hôte, générée **depuis une machine de confiance** (pas la CI) via `ssh-keyscan -p <port> <host>`, pour éviter tout risque de MITM |
-| `DEPLOY_PATH`      | Chemin absolu du clone sur le VPS |
-
-Le job `deploy` se connecte en SSH et exécute `git fetch && git reset
---hard origin/main && docker compose up -d --build` dans ce dossier — ce
-dossier ne doit jamais être modifié à la main sur le VPS, il est écrasé à
-chaque déploiement. La clé API Anthropic ne transite jamais par GitHub
-Actions : elle reste uniquement dans le `.env` local au VPS.
-
-Sans ces secrets configurés, le job `deploy` se contente d'afficher un
-message et de s'arrêter proprement (aucune tentative de connexion, aucun
-échec affiché) — cela n'affecte ni les tests, ni l'empaquetage et la
-publication de l'extension, qui restent indépendants.
-
-## Lancer les tests du backend
-
-```bash
-make test
-```
-
-La suite de tests (`pytest`) mocke intégralement le SDK Anthropic : elle
-valide que le pipeline complet du backend optionnel (prompt → réponse
-simulée → validation Pydantic → réponse HTTP) fonctionne sans jamais
-planter, y compris sur des cas concrets de mauvaise foi (attaque ad
-hominem, homme de paille, faux dilemme, diversion, cherry-picking
-statistique — voir `tests/fixtures/bad_faith_samples.py`).
-
-Un test d'intégration optionnel (`tests/test_live_integration.py`) effectue
-un véritable appel à l'API Anthropic. Il est désactivé par défaut :
-
-```bash
-REALITYWALL_RUN_LIVE_TESTS=1 .venv/bin/pytest -m integration
-```
+Copyright © 2026 ampynjord. **Tous droits réservés.** Ce code est
+propriétaire : aucune copie, modification ni redistribution sans
+autorisation écrite préalable. Voir [LICENSE](LICENSE).

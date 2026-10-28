@@ -138,6 +138,16 @@ function renderContexteSection(contexte) {
   `;
 }
 
+/** Seules les URLs http(s) deviennent des liens (jamais javascript:, data:...). */
+function isSafeHttpUrl(value) {
+  try {
+    const url = new URL(String(value).trim());
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch (error) {
+    return false;
+  }
+}
+
 function renderSourcesSection(sources) {
   if (!Array.isArray(sources) || sources.length === 0) {
     return '<p class="rw-empty">Aucune source trouvée pour ce texte.</p>';
@@ -147,7 +157,11 @@ function renderSourcesSection(sources) {
     .map(
       (source) => `
       <li class="rw-source-item">
-        <a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.url)}</a>
+        ${
+          isSafeHttpUrl(source.url)
+            ? `<a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.url)}</a>`
+            : `<span>${escapeHtml(source.url)}</span>`
+        }
         <p>${escapeHtml(source.description)}</p>
       </li>
     `
@@ -182,6 +196,10 @@ function renderResult(data) {
         <span class="rw-label">Sources</span>
         ${renderSourcesSection(data.sources)}
       </div>
+      <p class="rw-disclaimer">
+        Analyse automatique par IA, susceptible d'erreurs : vérifiez les
+        sources avant de vous y fier.
+      </p>
     </div>
   `;
 
