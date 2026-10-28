@@ -29,6 +29,10 @@ const RHETORIQUE_VALUES = RHETORIQUE_TYPES;
 const RETRYABLE_STATUSES = [429, 500, 502, 503, 529];
 let retryDelayMs = 1500;
 
+// Sites dont les images ont été refusées à l'API (robots.txt, accès protégé...) :
+// on ne les renvoie plus pendant la durée de vie du service worker.
+const blockedImageHosts = new Set();
+
 // Cache en mémoire (durée de vie du service worker) : relancer l'analyse du
 // même texte avec les mêmes réglages ne coûte ni temps ni jetons.
 const analysisCache = new Map();
@@ -323,6 +327,26 @@ function buildUserContent(context, webSearch, reply) {
   return blocks;
 }
 
+function hostnameOf(url) {
+  try {
+    return new URL(url).hostname;
+  } catch (error) {
+    return "";
+  }
+}
+
+/**
+ * Erreur 400 due au téléchargement d'une image par l'API (« This URL is
+ * disallowed by the website's robots.txt file », accès refusé, format...).
+ */
+function isImageFetchError(error) {
+  return (
+    error instanceof AnthropicError &&
+    error.status === 400 &&
+    /image|robots|download|fetch|\burl\b/i.test(error.apiMessage)
+  );
+}
+
 /** Même contexte sans les images servies par URL (l'API peut ne pas pouvoir les télécharger). */
 function withoutUrlImages(context) {
   return { ...context, images: [] };
@@ -504,14 +528,19 @@ async function requestAnalysis(apiKey, context, options) {
  * images servies par URL.
  */
 async function callAnthropic(apiKey, rawContext, options = {}) {
+  const requestedImages = Array.isArray(rawContext.images) ? rawContext.images.filter(isSafeHttpUrl) : [];
+  const usableImages = requestedImages.filter((url) => !blockedImageHosts.has(hostnameOf(url)));
   const context = {
     ...rawContext,
     text: clipText(rawContext.text, MAX_INPUT_CHARS),
     captions: clipText(rawContext.captions, MAX_CAPTION_CHARS),
     description: clipText(rawContext.description, MAX_DESCRIPTION_CHARS),
-    images: Array.isArray(rawContext.images) ? rawContext.images.filter(isSafeHttpUrl).slice(0, MAX_IMAGES) : [],
+    images: usableImages.slice(0, MAX_IMAGES),
     notes: Array.isArray(rawContext.notes) ? [...rawContext.notes] : [],
   };
+  if (requestedImages.length > usableImages.length) {
+    context.notes.push("Images ignorées : ce site interdit leur téléchargement par l'API.");
+  }
   const model = options.model || DEFAULT_MODEL;
   const webSearch = options.webSearch !== false;
 
@@ -539,16 +568,14 @@ async function callAnthropic(apiKey, rawContext, options = {}) {
   try {
     result = await requestAnalysis(apiKey, used, options);
   } catch (error) {
-    const imageProblem =
-      error instanceof AnthropicError &&
-      error.status === 400 &&
-      /image/i.test(error.apiMessage) &&
-      used.images.length > 0;
-    if (!imageProblem) {
+    if (!isImageFetchError(error) || used.images.length === 0) {
       throw error;
     }
+    for (const url of used.images) {
+      blockedImageHosts.add(hostnameOf(url));
+    }
     used = withoutUrlImages(used);
-    used.notes.push("Les images de la page n'ont pas pu être téléchargées par l'API : analyse sans elles.");
+    used.notes.push("Les images de la page n'ont pas pu être téléchargées par l'API (site qui les interdit) : analyse sans elles.");
     result = await requestAnalysis(apiKey, used, options);
   }
 
