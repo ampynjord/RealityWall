@@ -231,14 +231,14 @@ Une fois tes recherches terminées, tu dois OBLIGATOIREMENT appeler l'outil \
 aucun texte en dehors de l'appel d'outil final. N'ajoute aucune formule de \
 politesse, aucun avertissement, aucune méta-explication.`;
 
-/** Version avec filtrage dynamique (Sonnet 5, Opus 4.6+). */
+/** Version avec filtrage dynamique (Sonnet 5.5, Opus 5.5). */
 const WEB_SEARCH_TOOL = {
   type: "web_search_20260209",
   name: "web_search",
   max_uses: 1,
 };
 
-/** Version basique, seule disponible sur les modèles plus petits (Haiku 4.5). */
+/** Version basique, utilisée pour Haiku 5.5 et Fable 5.1. */
 const WEB_SEARCH_TOOL_BASIC = {
   type: "web_search_20250305",
   name: "web_search",
@@ -433,12 +433,23 @@ function buildUserPrompt(context, webSearch = true, reply = {}) {
   return lines.join("\n");
 }
 
-/** Message de relance forçant l'appel final de l'outil après la recherche. */
-function buildFinalizePrompt() {
-  return (
+/**
+ * Message de relance demandant l'appel final de l'outil. `results` : résultats
+ * de la recherche web déjà effectuée ({ url, title }), seules URLs autorisées.
+ */
+function buildFinalizePrompt(results = []) {
+  const lines = [
     "Tes recherches sont terminées. Appelle maintenant l'outil " +
-    "submit_reality_check avec ton analyse structurée finale. Le champ " +
-    "sources doit contenir uniquement des URLs réelles obtenues via " +
-    "web_search ci-dessus, jamais une URL inventée."
-  );
+      "submit_reality_check avec ton analyse structurée finale.",
+  ];
+  if (results.length > 0) {
+    lines.push(
+      "Résultats de la recherche web déjà effectuée : le champ sources ne " +
+        "peut contenir que ces URLs, jamais une URL inventée :",
+      ...results.map((result) => `- ${result.title || result.url} — ${result.url}`)
+    );
+  } else {
+    lines.push("Aucune source web n'est disponible : renvoie une liste sources vide.");
+  }
+  return lines.join("\n");
 }

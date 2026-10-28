@@ -9,7 +9,7 @@ const api = typeof browser !== "undefined" ? browser : chrome;
 
 const DEFAULTS = {
   anthropicApiKey: "",
-  model: "claude-sonnet-5",
+  model: "claude-sonnet-5-5",
   webSearch: true,
   useMedia: true,
   reply: true,
@@ -67,7 +67,7 @@ replyInput.addEventListener("change", syncReplyControls);
 async function loadOptions() {
   const stored = await api.storage.local.get(DEFAULTS);
   keyInput.value = stored.anthropicApiKey;
-  modelSelect.value = stored.model;
+  modelSelect.value = normalizeModel(stored.model);
   webSearchInput.checked = stored.webSearch !== false;
   useMediaInput.checked = stored.useMedia !== false;
   replyInput.checked = stored.reply !== false;
