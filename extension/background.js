@@ -28,8 +28,9 @@ const MENU_ID = "reality-wall-debunk";
 const MENU_ID_PAGE = "reality-wall-debunk-page";
 const MENU_ID_MEDIA = "reality-wall-debunk-media";
 
-// Analyses en cours, par onglet : permet d'annuler depuis la pop-up.
+// Analyses et régénérations de réponse en cours, par onglet : permet d'annuler.
 const inflight = new Map();
+const replyInflight = new Map();
 
 api.runtime.onInstalled.addListener((details) => {
   if (api.contextMenus) {
@@ -143,6 +144,11 @@ async function runAnalysis(context, tab, fresh) {
       replyStyle: settings.replyStyle,
       fresh: Boolean(fresh),
       signal: controller.signal,
+      onProgress: (progress) => {
+        if (inflight.get(tabId) === controller) {
+          notifyContentScript(tabId, { type: "REALITYWALL_PROGRESS", progress });
+        }
+      },
     });
     if (inflight.get(tabId) === controller) {
       await notifyContentScript(tabId, { type: "REALITYWALL_RESULT", payload: result });
@@ -160,6 +166,52 @@ async function runAnalysis(context, tab, fresh) {
   }
 }
 
+/** Régénère la réponse suggérée (autre ton / autre cible), sans recherche. */
+async function runReply(message, tab) {
+  if (!tab || typeof tab.id !== "number" || !message.context || !message.analysis) {
+    return;
+  }
+  const tabId = tab.id;
+  const settings = await getSettings();
+  if (!settings.apiKey) {
+    await notifyContentScript(tabId, {
+      type: "REALITYWALL_REPLY_ERROR",
+      message: "Aucune clé API Anthropic configurée.",
+    });
+    return;
+  }
+
+  const previous = replyInflight.get(tabId);
+  if (previous) {
+    previous.abort();
+  }
+  const controller = new AbortController();
+  replyInflight.set(tabId, controller);
+
+  try {
+    const reply = await callReply(settings.apiKey, message.context, message.analysis, {
+      model: settings.model,
+      tone: message.tone,
+      target: message.target,
+      replyStyle: settings.replyStyle,
+      signal: controller.signal,
+    });
+    if (replyInflight.get(tabId) === controller) {
+      await notifyContentScript(tabId, { type: "REALITYWALL_REPLY_RESULT", reply });
+    }
+  } catch (error) {
+    if (error && error.name === "AbortError") {
+      return;
+    }
+    const text = error instanceof Error ? error.message : String(error);
+    await notifyContentScript(tabId, { type: "REALITYWALL_REPLY_ERROR", message: text });
+  } finally {
+    if (replyInflight.get(tabId) === controller) {
+      replyInflight.delete(tabId);
+    }
+  }
+}
+
 api.runtime.onMessage.addListener((message, sender) => {
   if (!message || typeof message.type !== "string") {
     return;
@@ -169,11 +221,17 @@ api.runtime.onMessage.addListener((message, sender) => {
     if (sender && sender.id === api.runtime.id && sender.tab) {
       runAnalysis(message.context, sender.tab, message.fresh);
     }
+  } else if (message.type === "REALITYWALL_REPLY") {
+    if (sender && sender.id === api.runtime.id && sender.tab) {
+      runReply(message, sender.tab);
+    }
   } else if (message.type === "REALITYWALL_CANCEL") {
-    const controller = sender && sender.tab ? inflight.get(sender.tab.id) : null;
-    if (controller) {
-      controller.abort();
-      inflight.delete(sender.tab.id);
+    for (const map of [inflight, replyInflight]) {
+      const controller = sender && sender.tab ? map.get(sender.tab.id) : null;
+      if (controller) {
+        controller.abort();
+        map.delete(sender.tab.id);
+      }
     }
   } else if (message.type === "REALITYWALL_OPEN_OPTIONS") {
     api.runtime.openOptionsPage();

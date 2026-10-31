@@ -19,6 +19,20 @@ const MARGIN = 12;
 const MIN_SELECTION_CHARS = 15;
 const SLOW_HINT_SECONDS = 20;
 
+const STAGE_LABELS = {
+  thinking: "Réflexion en cours…",
+  searching: "Recherche de sources sur le web…",
+  writing: "Rédaction du verdict…",
+};
+
+const REPLY_TONE_OPTIONS = [
+  ["neutre", "Neutre"],
+  ["ferme", "Ferme"],
+  ["chaleureux", "Chaleureux"],
+  ["question", "Par questions"],
+  ["concis", "Très court"],
+];
+
 const STATUT_HELP = {
   Vrai: "Affirmation exacte et correctement contextualisée.",
   Faux: "Affirmation contredite par les données vérifiables.",
@@ -30,6 +44,7 @@ const STATUT_HELP = {
 let lastPointer = { x: 200, y: 120 };
 let lastContextTarget = null;
 let lastContext = null;
+let lastAnalysis = null;
 let userPosition = null;
 let loadingTimer = null;
 
@@ -222,6 +237,7 @@ function renderLoading(label) {
       <div class="rw-loading-text">
         <p class="rw-loading-label">${escapeHtml(label)}</p>
         <p class="rw-loading-time"><span class="rw-elapsed">0</span> s</p>
+        <div class="rw-preview" hidden></div>
         <p class="rw-loading-hint" hidden>
           Long ? Désactivez la recherche web ou choisissez Claude Haiku dans
           les réglages de l'extension pour aller plus vite.
@@ -322,13 +338,11 @@ function sourcesHtml(sources) {
     : '<p class="rw-empty">Aucune source vérifiée (recherche web désactivée ou sans résultat).</p>';
 }
 
-function replyHtml(reply, sources) {
-  if (!reply) {
-    return '<p class="rw-empty">Rien de factuel à répondre à ce contenu.</p>';
-  }
+function replyHtml(reply, sources, defaultTarget) {
   const first = (sources || []).find((source) => isSafeHttpUrl(source.url));
   return `
-    <textarea class="rw-reply-text" rows="5" spellcheck="true" aria-label="Réponse suggérée"></textarea>
+    <textarea class="rw-reply-text" rows="5" spellcheck="true" aria-label="Réponse suggérée"
+      placeholder="Aucune réponse proposée : choisissez un ton et régénérez."></textarea>
     ${
       first
         ? `<label class="rw-check"><input type="checkbox" class="rw-include-source" checked /> Ajouter la source (${escapeHtml(hostOf(first.url))})</label>`
@@ -338,6 +352,19 @@ function replyHtml(reply, sources) {
       <button type="button" class="rw-btn rw-copy">Copier la réponse</button>
       <span class="rw-count rw-reply-length"></span>
     </div>
+    <div class="rw-reply-controls">
+      <label class="rw-field">Ton
+        <select class="rw-reply-tone">${REPLY_TONE_OPTIONS.map(([value, label]) => `<option value="${value}">${escapeHtml(label)}</option>`).join("")}</select>
+      </label>
+      <label class="rw-field">Répondre à
+        <select class="rw-reply-target">
+          <option value="message"${defaultTarget === "message" ? " selected" : ""}>Ce message</option>
+          <option value="publication"${defaultTarget === "publication" ? " selected" : ""}>La publication</option>
+        </select>
+      </label>
+      <button type="button" class="rw-btn rw-secondary rw-regen">Régénérer</button>
+    </div>
+    <p class="rw-reply-status" role="status"></p>
   `;
 }
 
@@ -363,20 +390,19 @@ function legacyCopy(text) {
 
 function bindReply(overlay, data) {
   const textarea = overlay.querySelector(".rw-reply-text");
-  if (!textarea) {
-    return;
-  }
-  textarea.value = data.reponse_suggeree;
   const includeSource = overlay.querySelector(".rw-include-source");
   const length = overlay.querySelector(".rw-reply-length");
+  const status = overlay.querySelector(".rw-reply-status");
+  const regen = overlay.querySelector(".rw-regen");
   const first = (data.sources || []).find((source) => isSafeHttpUrl(source.url));
+  textarea.value = data.reponse_suggeree || "";
 
   const finalText = () =>
-    includeSource && includeSource.checked && first
+    includeSource && includeSource.checked && first && textarea.value.trim()
       ? `${textarea.value.trim()}\n\nSource : ${first.url}`
       : textarea.value.trim();
   const updateLength = () => {
-    length.textContent = `${finalText().length} car.`;
+    length.textContent = textarea.value.trim() ? `${finalText().length} car.` : "";
   };
   textarea.addEventListener("input", updateLength);
   if (includeSource) {
@@ -386,15 +412,52 @@ function bindReply(overlay, data) {
 
   const copy = overlay.querySelector(".rw-copy");
   copy.addEventListener("click", async () => {
+    if (!textarea.value.trim()) {
+      return;
+    }
     await copyToClipboard(finalText());
     copy.textContent = "Copié ✓";
     setTimeout(() => {
       copy.textContent = "Copier la réponse";
     }, 1800);
   });
+
+  regen.addEventListener("click", () => {
+    regen.disabled = true;
+    status.textContent = "Rédaction en cours…";
+    status.classList.remove("rw-reply-error");
+    api.runtime.sendMessage({
+      type: "REALITYWALL_REPLY",
+      context: lastContext,
+      analysis: lastAnalysis,
+      tone: overlay.querySelector(".rw-reply-tone").value,
+      target: overlay.querySelector(".rw-reply-target").value,
+    });
+  });
+}
+
+/** Résultat ou erreur d'une régénération de réponse, dans le pop-up affiché. */
+function applyReplyResult(reply, errorMessage) {
+  const overlay = getOverlay();
+  const textarea = overlay && overlay.querySelector(".rw-reply-text");
+  if (!textarea) {
+    return;
+  }
+  const status = overlay.querySelector(".rw-reply-status");
+  overlay.querySelector(".rw-regen").disabled = false;
+  if (errorMessage) {
+    status.textContent = errorMessage;
+    status.classList.add("rw-reply-error");
+    return;
+  }
+  textarea.value = reply;
+  textarea.dispatchEvent(new Event("input"));
+  status.classList.remove("rw-reply-error");
+  status.textContent = reply ? "" : "Rien de factuel à répondre avec ce ton et cette cible.";
 }
 
 function renderResult(data) {
+  lastAnalysis = data;
   const meta = data.meta || { used: [], notes: [] };
   const rhetorique = Array.isArray(data.rhetorique) ? data.rhetorique : [];
   const sources = Array.isArray(data.sources) ? data.sources : [];
@@ -407,7 +470,7 @@ function renderResult(data) {
     </div>
     ${meta.used.length ? `<p class="rw-used">Analysé : ${escapeHtml(meta.used.join(" · "))}</p>` : ""}
     ${meta.notes.map((note) => `<p class="rw-note">${escapeHtml(note)}</p>`).join("")}
-    ${sectionHtml("Réponse suggérée", "", replyHtml(data.reponse_suggeree, sources), Boolean(data.reponse_suggeree))}
+    ${meta.reply !== false ? sectionHtml("Réponse suggérée", "", replyHtml(data.reponse_suggeree, sources, lastContext && lastContext.mode === "page" ? "publication" : "message"), Boolean(data.reponse_suggeree)) : ""}
     ${sectionHtml("Rhétorique", rhetorique.length ? String(rhetorique.length) : "aucune", rhetoriqueHtml(rhetorique), rhetorique.length > 0)}
     ${sectionHtml(
       "Contexte",
@@ -433,6 +496,36 @@ function renderResult(data) {
     details.addEventListener("toggle", () => placeOverlay(overlay))
   );
   placeOverlay(overlay);
+}
+
+// ---------------------------------------------------------------------------
+// Progression en direct (étapes, verdict provisoire)
+// ---------------------------------------------------------------------------
+
+function applyProgress(progress) {
+  const overlay = getOverlay();
+  if (!overlay || !overlay.querySelector(".rw-loading") || !progress) {
+    return;
+  }
+  if (progress.type === "stage" && STAGE_LABELS[progress.stage]) {
+    overlay.querySelector(".rw-loading-label").textContent = STAGE_LABELS[progress.stage];
+  } else if (progress.type === "partial") {
+    const preview = overlay.querySelector(".rw-preview");
+    const fields = progress.fields || {};
+    if (fields.statut) {
+      preview.dataset.statut = fields.statut;
+    }
+    if (fields.resume) {
+      preview.dataset.resume = fields.resume;
+    }
+    preview.innerHTML = `
+      <span class="rw-label">Verdict provisoire</span>
+      ${preview.dataset.statut ? `<span class="rw-badge ${statutBadgeClass(preview.dataset.statut)}">${escapeHtml(preview.dataset.statut)}</span>` : ""}
+      ${preview.dataset.resume ? `<p class="rw-summary">${escapeHtml(preview.dataset.resume)}</p>` : ""}
+    `;
+    preview.hidden = false;
+    placeOverlay(overlay);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -492,6 +585,8 @@ function reanalyze(fresh) {
 // ---------------------------------------------------------------------------
 
 let bubbleTimer = null;
+// Sélection déjà soumise : le bouton ne réapparaît pas pour ce même texte.
+let dismissedSelection = "";
 
 function hideBubble() {
   const bubble = document.getElementById(BUBBLE_ID);
@@ -509,6 +604,10 @@ async function updateBubble() {
   const selection = window.getSelection ? window.getSelection() : null;
   const text = selection ? selection.toString().trim() : "";
   if (!selection || selection.rangeCount === 0 || text.length < MIN_SELECTION_CHARS || insideOwnUi(selection.anchorNode)) {
+    hideBubble();
+    return;
+  }
+  if (text === dismissedSelection) {
     hideBubble();
     return;
   }
@@ -535,6 +634,7 @@ async function updateBubble() {
     // Garde la sélection active quand on clique sur le bouton.
     bubble.addEventListener("mousedown", (event) => event.preventDefault());
     bubble.addEventListener("click", () => {
+      dismissedSelection = window.getSelection().toString().trim();
       lastPointer = { x: bubble.offsetLeft, y: bubble.offsetTop };
       startAnalysis("selection");
     });
@@ -553,7 +653,11 @@ function scheduleBubbleUpdate() {
   bubbleTimer = setTimeout(updateBubble, 180);
 }
 
-document.addEventListener("mouseup", scheduleBubbleUpdate);
+document.addEventListener("mouseup", (event) => {
+  if (!insideOwnUi(event.target)) {
+    scheduleBubbleUpdate();
+  }
+});
 document.addEventListener("keyup", (event) => {
   if (event.key === "Shift" || event.key.startsWith("Arrow")) {
     scheduleBubbleUpdate();
@@ -587,8 +691,17 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case "REALITYWALL_LOADING":
       renderLoading(message.label || "Analyse en cours…");
       break;
+    case "REALITYWALL_PROGRESS":
+      applyProgress(message.progress);
+      break;
     case "REALITYWALL_RESULT":
       renderResult(message.payload);
+      break;
+    case "REALITYWALL_REPLY_RESULT":
+      applyReplyResult(message.reply, null);
+      break;
+    case "REALITYWALL_REPLY_ERROR":
+      applyReplyResult(null, message.message);
       break;
     case "REALITYWALL_ERROR":
       renderError(message.message);

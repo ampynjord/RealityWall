@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "RealityWall",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Sélectionnez un texte, clic droit (ou icône), débunkez. Un mur de faits infranchissable face à la mauvaise foi numérique.",
   "icons": {
     "16": "icons/icon16.png",

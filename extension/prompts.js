@@ -107,12 +107,7 @@ const RHETORIQUE_CATALOG = [
 
 const RHETORIQUE_TYPES = RHETORIQUE_CATALOG.map((entry) => entry.type);
 
-const SYSTEM_PROMPT = `Tu es RealityWall, un moteur d'analyse factuelle et rhétorique. \
-Tu agis comme un compilateur logique froid : tu détectes des erreurs de \
-logique et des écarts factuels, jamais comme un commentateur, un juge \
-moral ou un militant.
-
-RÈGLE ABSOLUE — NEUTRALITÉ :
+const NEUTRALITY_RULES = `RÈGLE ABSOLUE — NEUTRALITÉ :
 - Tu n'exprimes jamais d'opinion politique, morale, idéologique ou personnelle.
 - Tu ne dis jamais qu'une position est "bien" ou "mal", "juste" ou "injuste" \
 sur le plan moral.
@@ -124,7 +119,14 @@ vérifiable), tu classes son statut "Hors-sujet", sans jamais indiquer si \
 cette opinion est bonne ou mauvaise.
 - Tu ne prends jamais parti entre deux camps politiques, religieux ou \
 identitaires : tu analyses uniquement la structure logique et factuelle \
-du texte qui t'est soumis.
+du texte qui t'est soumis.`;
+
+const SYSTEM_PROMPT = `Tu es RealityWall, un moteur d'analyse factuelle et rhétorique. \
+Tu agis comme un compilateur logique froid : tu détectes des erreurs de \
+logique et des écarts factuels, jamais comme un commentateur, un juge \
+moral ou un militant.
+
+${NEUTRALITY_RULES}
 
 MÉTHODE :
 Tu reçois un texte extrait d'un contenu web (réseau social, commentaire, \
@@ -451,5 +453,129 @@ function buildFinalizePrompt(results = []) {
   } else {
     lines.push("Aucune source web n'est disponible : renvoie une liste sources vide.");
   }
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Réponse suggérée régénérable (autre ton, autre cible), sans nouvelle recherche
+// ---------------------------------------------------------------------------
+
+const REPLY_SYSTEM_PROMPT = `Tu es RealityWall. Tu rédiges une réponse à publier sur \
+les réseaux sociaux à partir d'une analyse factuelle et rhétorique DÉJÀ \
+établie : tu ne refais pas l'analyse, tu ne cherches rien, tu t'appuies \
+uniquement sur ce verdict et sur les sources vérifiées fournies.
+
+${NEUTRALITY_RULES}
+
+RÈGLES DE LA RÉPONSE :
+- Même langue que le texte analysé (français par défaut). Courtoise, \
+pragmatique, factuelle ; jamais d'insulte, de sarcasme, de moralisation ni de \
+prise de parti : tu corriges des faits ou pointes un raisonnement, tu ne juges \
+pas la personne.
+- Nomme l'organisme d'une source (« selon l'INSEE... ») mais N'ÉCRIS JAMAIS \
+d'URL : l'extension ajoute elle-même le lien vérifié. Sans source vérifiée, \
+n'affirme aucun chiffre ni fait précis : pose une question ou demande la source.
+- Réponds à ce qui est réellement écrit ; si un point est exact, reconnais-le \
+brièvement avant de nuancer.
+- S'il n'y a rien de factuel ou de logique à répondre, renvoie une chaîne vide.
+- Appelle l'outil submit_reply avec le texte de la réponse, sans rien écrire \
+d'autre.`;
+
+const REPLY_TOOL = {
+  name: "submit_reply",
+  description: "Soumet la réponse prête à publier.",
+  input_schema: {
+    type: "object",
+    properties: {
+      reponse: {
+        type: "string",
+        description:
+          "Texte de la réponse, sans aucune URL. Chaîne vide s'il n'y a rien à répondre.",
+      },
+    },
+    required: ["reponse"],
+  },
+};
+
+const REPLY_TONES = {
+  neutre: "neutre et pragmatique : expose les faits et la nuance, sans émotion.",
+  ferme:
+    "ferme mais courtois : va droit au point, corrige clairement l'erreur sans " +
+    "agressivité ni condescendance.",
+  chaleureux:
+    "chaleureux et ouvert : reconnais ce qui est juste et propose les faits " +
+    "comme une aide à la discussion.",
+  question:
+    "sous forme de questions : une ou deux questions précises qui amènent " +
+    "l'interlocuteur à vérifier lui-même (source, période, définition), sans " +
+    "affirmer plus que ce que les sources établissent.",
+  concis: "ultra concis : un seul point, une ou deux phrases.",
+};
+
+const REPLY_TARGETS = {
+  message:
+    "le texte analysé ci-dessous (un message ou commentaire) : tu lui réponds " +
+    "directement",
+  publication:
+    "la publication principale de la page (titre et description fournis) : " +
+    "tu réagis à son contenu, pas à un commentaire en particulier",
+};
+
+function hostOfUrl(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch (error) {
+    return "";
+  }
+}
+
+/**
+ * Message utilisateur pour régénérer la réponse. `analysis` est le verdict
+ * déjà affiché ({ statut, resume, rhetorique, contexte, sources }).
+ */
+function buildReplyPrompt(context, analysis, options = {}) {
+  const ctx = context || {};
+  const tone = REPLY_TONES[options.tone] || REPLY_TONES.neutre;
+  const target = REPLY_TARGETS[options.target] || REPLY_TARGETS.message;
+  const style =
+    options.tone === "concis"
+      ? REPLY_STYLE_LABELS.court
+      : REPLY_STYLE_LABELS[options.style] || REPLY_STYLE_LABELS.court;
+
+  const lines = [
+    "Rédige UNE réponse prête à publier.",
+    `Tu réponds à : ${target}.`,
+    `Ton : ${tone}`,
+    `Longueur : ${style}.`,
+  ];
+  if (ctx.pageTitle) {
+    lines.push(`Titre de la page : ${ctx.pageTitle}`);
+  }
+  if (ctx.description) {
+    lines.push(`Description de la page : ${ctx.description}`);
+  }
+  lines.push("", "Texte analysé :", "<texte>", String(ctx.text || "").trim(), "</texte>");
+  if (ctx.captions) {
+    lines.push("", "Sous-titres de la vidéo :", "<soustitres>", ctx.captions.trim(), "</soustitres>");
+  }
+
+  const a = analysis || {};
+  lines.push("", `Verdict déjà établi : ${a.statut || "?"} — ${a.resume || ""}`.trim());
+  for (const item of a.rhetorique || []) {
+    lines.push(`Procédé détecté : ${item.type} — ${item.explication}${item.extrait ? ` (« ${item.extrait} »)` : ""}`);
+  }
+  if (a.contexte && a.contexte.probleme_detecte) {
+    lines.push(`Contexte manquant : ${a.contexte.explication}`);
+  }
+  const sources = a.sources || [];
+  if (sources.length > 0) {
+    lines.push("Sources vérifiées (nomme l'organisme, jamais l'URL) :");
+    for (const source of sources) {
+      lines.push(`- ${hostOfUrl(source.url) || "source"} : ${source.description}`);
+    }
+  } else {
+    lines.push("Aucune source vérifiée : n'affirme aucun chiffre ni fait précis.");
+  }
+  lines.push("", "Appelle l'outil submit_reply.");
   return lines.join("\n");
 }
