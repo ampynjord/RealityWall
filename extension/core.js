@@ -35,6 +35,7 @@ const MAX_IMAGES = 3;
 const MAX_FRAME_BASE64_CHARS = 1500000;
 const MAX_COMBINED_TOKENS = 12000;
 const MAX_OUTPUT_TOKENS = 8000;
+const MAX_REPLY_TOKENS = 4000;
 const MAX_SOURCES = 3;
 const MAX_RHETORIQUE = 3;
 const MAX_REPLY_CHARS = 800;
@@ -392,7 +393,156 @@ class AnthropicError extends Error {
   }
 }
 
-async function postMessages(apiKey, body, signal) {
+function abortedError() {
+  const aborted = new Error("Analyse annulée.");
+  aborted.name = "AbortError";
+  return aborted;
+}
+
+/** Valeur du premier champ chaîne complet `"key": "..."` d'un JSON partiel, ou undefined. */
+function extractPartialString(partialJson, key) {
+  const match = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`).exec(partialJson);
+  if (!match) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(`"${match[1]}"`);
+  } catch (error) {
+    return undefined;
+  }
+}
+
+const STREAM_ERROR_STATUS = { overloaded_error: 529, rate_limit_error: 429, api_error: 500 };
+
+/**
+ * Lit une réponse en flux (SSE) et reconstitue le message ({ content,
+ * stop_reason }). `onProgress` reçoit les étapes ("thinking", "searching",
+ * "writing") et le verdict partiel ({ statut, resume }) dès qu'ils sont
+ * complets dans l'appel d'outil en cours d'écriture.
+ */
+async function readMessageStream(response, onProgress, signal) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const blocks = [];
+  const emitted = new Set();
+  let stopReason = null;
+  let buffer = "";
+
+  const stage = (name) => {
+    if (!emitted.has(`stage:${name}`)) {
+      emitted.add(`stage:${name}`);
+      onProgress({ type: "stage", stage: name });
+    }
+  };
+
+  const handle = (event) => {
+    if (event.type === "content_block_start") {
+      const block = { ...event.content_block };
+      if (block.type === "tool_use" || block.type === "server_tool_use") {
+        block.input = {};
+        block.partialJson = "";
+      }
+      blocks[event.index] = block;
+      if (block.type === "thinking" || block.type === "redacted_thinking") {
+        stage("thinking");
+      } else if (block.type === "server_tool_use") {
+        stage("searching");
+      } else if (block.type === "tool_use" && block.name === TOOL_NAME) {
+        stage("writing");
+      }
+    } else if (event.type === "content_block_delta") {
+      const block = blocks[event.index];
+      const delta = event.delta || {};
+      if (!block) {
+        return;
+      }
+      if (delta.type === "text_delta") {
+        block.text = (block.text || "") + delta.text;
+      } else if (delta.type === "thinking_delta") {
+        block.thinking = (block.thinking || "") + delta.thinking;
+      } else if (delta.type === "signature_delta") {
+        block.signature = delta.signature;
+      } else if (delta.type === "citations_delta") {
+        block.citations = [...(block.citations || []), delta.citation];
+      } else if (delta.type === "input_json_delta") {
+        block.partialJson += delta.partial_json;
+        if (block.type === "tool_use" && block.name === TOOL_NAME) {
+          const fields = {};
+          for (const key of ["statut", "resume"]) {
+            const value = extractPartialString(block.partialJson, key);
+            if (value !== undefined && !emitted.has(`field:${key}`)) {
+              emitted.add(`field:${key}`);
+              fields[key] = value;
+            }
+          }
+          if (Object.keys(fields).length > 0) {
+            onProgress({ type: "partial", fields });
+          }
+        }
+      }
+    } else if (event.type === "content_block_stop") {
+      const block = blocks[event.index];
+      if (block && block.partialJson !== undefined) {
+        try {
+          block.input = block.partialJson ? JSON.parse(block.partialJson) : {};
+        } catch (error) {
+          block.input = {};
+        }
+        delete block.partialJson;
+      }
+    } else if (event.type === "message_delta") {
+      stopReason = (event.delta && event.delta.stop_reason) || stopReason;
+    } else if (event.type === "error") {
+      const type = event.error && event.error.type;
+      const status = STREAM_ERROR_STATUS[type] || 500;
+      const message = event.error && event.error.message;
+      throw new AnthropicError(friendlyApiError(status, { error: event.error }), status, message);
+    }
+  };
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      let end;
+      while ((end = buffer.indexOf("\n\n")) !== -1) {
+        const raw = buffer.slice(0, end);
+        buffer = buffer.slice(end + 2);
+        const data = raw
+          .split("\n")
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.slice(5).trim())
+          .join("");
+        if (!data) {
+          continue;
+        }
+        let event;
+        try {
+          event = JSON.parse(data);
+        } catch (error) {
+          continue;
+        }
+        handle(event);
+      }
+    }
+  } catch (error) {
+    if ((error && error.name === "AbortError") || (signal && signal.aborted)) {
+      throw abortedError();
+    }
+    throw error;
+  }
+  return { content: blocks.filter(Boolean), stop_reason: stopReason };
+}
+
+/**
+ * Appel à l'API Messages. Avec `onProgress`, la réponse est lue en flux
+ * (étapes et verdict partiel affichés au fil de l'eau) ; sinon, en un bloc.
+ */
+async function postMessages(apiKey, body, signal, onProgress) {
+  const streaming = typeof onProgress === "function";
   let attempt = 0;
   for (;;) {
     let response;
@@ -405,22 +555,24 @@ async function postMessages(apiKey, body, signal) {
           "anthropic-version": ANTHROPIC_VERSION,
           "anthropic-dangerous-direct-browser-access": "true",
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(streaming ? { ...body, stream: true } : body),
         signal,
       });
     } catch (error) {
       if (error && error.name === "AbortError") {
-        const aborted = new Error("Analyse annulée.");
-        aborted.name = "AbortError";
-        throw aborted;
+        throw abortedError();
       }
       throw new Error("Impossible de joindre l'API Anthropic. Vérifiez votre connexion internet.");
     }
 
-    const parsed = await response.json().catch(() => null);
     if (response.ok) {
-      return parsed;
+      if (streaming && response.body && typeof response.body.getReader === "function") {
+        return readMessageStream(response, onProgress, signal);
+      }
+      return response.json();
     }
+
+    const parsed = await response.json().catch(() => null);
     if (attempt === 0 && RETRYABLE_STATUSES.includes(response.status)) {
       attempt += 1;
       await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
@@ -491,7 +643,8 @@ async function requestAnalysis(apiKey, context, options) {
       tools: webSearch ? [getWebSearchTool(model), REALITY_CHECK_TOOL] : [REALITY_CHECK_TOOL],
       messages: [{ role: "user", content }],
     },
-    options.signal
+    options.signal,
+    options.onProgress
   );
   checkStopReason(first);
   const searchedUrls = webSearch ? collectSearchUrls(first.content) : new Set();
@@ -515,7 +668,8 @@ async function requestAnalysis(apiKey, context, options) {
           },
         ],
       },
-      options.signal
+      options.signal,
+      options.onProgress
     );
     checkStopReason(second);
     toolInput = extractToolInput(second);
@@ -603,7 +757,53 @@ async function callAnthropic(apiKey, rawContext, options = {}) {
   result.rhetorique = result.rhetorique.slice(0, MAX_RHETORIQUE);
   result.reponse_suggeree = options.reply === false ? "" : sanitizeReply(result.reponse_suggeree);
   result.meta = describeContext(used);
+  result.meta.reply = options.reply !== false;
 
   cacheSet(cacheKey, result);
   return result;
+}
+
+/**
+ * Régénère la réponse suggérée avec un autre ton ou une autre cible, à partir
+ * d'une analyse déjà faite : un seul appel, sans recherche web, donc rapide.
+ * options : { model, tone, target, replyStyle, signal }.
+ */
+async function callReply(apiKey, rawContext, analysis, options = {}) {
+  const context = {
+    ...rawContext,
+    text: clipText(rawContext.text, MAX_INPUT_CHARS),
+    captions: clipText(rawContext.captions, MAX_CAPTION_CHARS),
+    description: clipText(rawContext.description, MAX_DESCRIPTION_CHARS),
+  };
+  const body = await postMessages(
+    apiKey,
+    {
+      model: normalizeModel(options.model),
+      max_tokens: MAX_REPLY_TOKENS,
+      system: REPLY_SYSTEM_PROMPT,
+      output_config: { effort: "low" },
+      tools: [REPLY_TOOL],
+      messages: [
+        {
+          role: "user",
+          content: buildReplyPrompt(context, analysis, {
+            tone: options.tone,
+            target: options.target,
+            style: options.replyStyle,
+          }),
+        },
+      ],
+    },
+    options.signal
+  );
+  checkStopReason(body);
+
+  const blocks = Array.isArray(body.content) ? body.content : [];
+  const tool = blocks.find((block) => block && block.type === "tool_use" && block.name === REPLY_TOOL.name);
+  const text = blocks.find((block) => block && block.type === "text" && block.text);
+  const raw = tool && tool.input && typeof tool.input.reponse === "string" ? tool.input.reponse : text ? text.text : null;
+  if (raw === null) {
+    throw new Error("Le modèle n'a pas renvoyé de réponse.");
+  }
+  return sanitizeReply(raw);
 }

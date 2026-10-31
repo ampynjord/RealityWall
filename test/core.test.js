@@ -10,7 +10,7 @@ const vm = require("node:vm");
 const EXT = path.join(__dirname, "..", "extension");
 
 function loadContext(fetchImpl) {
-  const ctx = vm.createContext({ URL, console, setTimeout, Promise, JSON, AbortController });
+  const ctx = vm.createContext({ URL, console, setTimeout, Promise, JSON, AbortController, TextDecoder });
   ctx.fetch = fetchImpl;
   for (const file of ["prompts.js", "core.js"]) {
     vm.runInContext(fs.readFileSync(path.join(EXT, file), "utf8"), ctx, { filename: file });
@@ -37,7 +37,7 @@ const VALID = {
 const ctxOf = (text, extra = {}) => ({ mode: "selection", text, pageUrl: "https://page.example/p", ...extra });
 
 function jsonResponse(status, body) {
-  return { ok: status >= 200 && status < 300, status, json: async () => body };
+  return { ok: status >= 200 && status < 300, status, json: async () => structuredClone(body) };
 }
 
 /** Double de fetch qui rejoue des réponses dans l'ordre et enregistre les requêtes. */
@@ -583,4 +583,245 @@ test("le manifest référence des fichiers existants, dans le bon ordre", () => 
   for (const file of files) {
     assert.ok(fs.existsSync(path.join(EXT, file)), `${file} manquant`);
   }
+});
+
+// --- Flux (SSE) : étapes et verdict partiel -----------------------------------------
+
+/** Réponse HTTP en flux SSE, découpée en `chunkSize` octets pour tester le réassemblage. */
+function sseResponse(events, chunkSize = 37) {
+  const text = events.map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join("");
+  const bytes = new TextEncoder().encode(text);
+  let offset = 0;
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (offset >= bytes.length) return { done: true, value: undefined };
+          const value = bytes.slice(offset, offset + chunkSize);
+          offset += chunkSize;
+          return { done: false, value };
+        },
+      }),
+    },
+  };
+}
+
+const blockStart = (index, content_block) => ({ type: "content_block_start", index, content_block });
+const blockDelta = (index, delta) => ({ type: "content_block_delta", index, delta });
+const blockStop = (index) => ({ type: "content_block_stop", index });
+
+function streamEvents(input) {
+  const json = JSON.stringify(input);
+  const cut = Math.floor(json.length / 3);
+  return [
+    { type: "message_start", message: { id: "m", content: [] } },
+    blockStart(0, { type: "thinking", thinking: "" }),
+    blockDelta(0, { type: "thinking_delta", thinking: "hmm" }),
+    blockDelta(0, { type: "signature_delta", signature: "sig" }),
+    blockStop(0),
+    blockStart(1, { type: "server_tool_use", id: "srv_1", name: "web_search", input: {} }),
+    blockDelta(1, { type: "input_json_delta", partial_json: '{"query":"chômage insee"}' }),
+    blockStop(1),
+    blockStart(2, {
+      type: "web_search_tool_result",
+      tool_use_id: "srv_1",
+      content: [{ type: "web_search_result", url: "https://www.insee.fr/fr/stat", title: "INSEE" }],
+    }),
+    blockStop(2),
+    { type: "ping" },
+    blockStart(3, { type: "tool_use", id: "tu_1", name: "submit_reality_check", input: {} }),
+    blockDelta(3, { type: "input_json_delta", partial_json: json.slice(0, cut) }),
+    blockDelta(3, { type: "input_json_delta", partial_json: json.slice(cut, 2 * cut) }),
+    blockDelta(3, { type: "input_json_delta", partial_json: json.slice(2 * cut) }),
+    blockStop(3),
+    { type: "message_delta", delta: { stop_reason: "tool_use" } },
+    { type: "message_stop" },
+  ];
+}
+
+test("flux SSE : message reconstitué, étapes et verdict partiel émis dans l'ordre", async () => {
+  const input = {
+    ...VALID,
+    sources: [
+      { url: "https://www.insee.fr/fr/stat", description: "Réelle" },
+      { url: "https://inventee.example", description: "Inventée" },
+    ],
+  };
+  const fetchFn = fakeFetch([sseResponse(streamEvents(input))]);
+  const ctx = loadContext(fetchFn);
+  const progress = [];
+  const result = await get(ctx, "callAnthropic")("clé", ctxOf("On le sait : soit on ferme, soit on meurt."), {
+    onProgress: (event) => progress.push(plain(event)),
+  });
+
+  assert.equal(fetchFn.calls[0].body.stream, true);
+  assert.deepEqual(
+    progress.map((e) => (e.type === "stage" ? `stage:${e.stage}` : `partial:${Object.keys(e.fields).join("+")}`)),
+    ["stage:thinking", "stage:searching", "stage:writing", "partial:statut+resume"]
+  );
+  assert.equal(progress.at(-1).fields.statut, "Faux");
+  assert.equal(progress.at(-1).fields.resume, "Le chiffre cité est inexact.");
+
+  assert.equal(result.statut, "Faux");
+  assert.deepEqual(plain(result.sources.map((s) => s.description)), ["Réelle"], "sources filtrées sur les résultats du flux");
+  assert.equal(result.reponse_suggeree.startsWith("Selon l'INSEE"), true);
+});
+
+test("flux SSE : le verdict partiel gère les échappements et n'est émis qu'une fois", async () => {
+  const input = { ...VALID, resume: 'Il a dit « non » — "oui".\nFin.' };
+  const fetchFn = fakeFetch([sseResponse(streamEvents(input), 11)]);
+  const progress = [];
+  await get(loadContext(fetchFn), "callAnthropic")("clé", ctxOf("texte flux 2"), {
+    webSearch: false,
+    onProgress: (event) => progress.push(plain(event)),
+  });
+  const partials = progress.filter((e) => e.type === "partial");
+  assert.equal(partials.length, 1);
+  assert.equal(partials[0].fields.resume, 'Il a dit « non » — "oui".\nFin.');
+});
+
+test("flux SSE : erreur survenue en cours de flux", async () => {
+  const events = [
+    { type: "message_start", message: { id: "m", content: [] } },
+    { type: "error", error: { type: "overloaded_error", message: "Overloaded" } },
+  ];
+  await assert.rejects(
+    get(loadContext(fakeFetch([sseResponse(events)])), "callAnthropic")("clé", ctxOf("texte flux 3"), {
+      webSearch: false,
+      onProgress: () => {},
+    }),
+    /surchargée/
+  );
+});
+
+test("flux SSE : refus du modèle et absence d'outil suivis de la requête de secours", async () => {
+  const noTool = [
+    { type: "message_start", message: { id: "m", content: [] } },
+    blockStart(0, { type: "text", text: "" }),
+    blockDelta(0, { type: "text_delta", text: "Je vais d'abord chercher." }),
+    blockStop(0),
+    { type: "message_delta", delta: { stop_reason: "pause_turn" } },
+  ];
+  const fetchFn = fakeFetch([sseResponse(noTool), sseResponse(streamEvents(VALID))]);
+  const result = await get(loadContext(fetchFn), "callAnthropic")("clé", ctxOf("texte flux 4"), { onProgress: () => {} });
+  assert.equal(fetchFn.calls.length, 2);
+  assert.equal(result.statut, "Faux");
+
+  const refusal = [
+    { type: "message_start", message: { id: "m", content: [] } },
+    { type: "message_delta", delta: { stop_reason: "refusal" } },
+  ];
+  await assert.rejects(
+    get(loadContext(fakeFetch([sseResponse(refusal)])), "callAnthropic")("clé", ctxOf("texte flux 5"), { webSearch: false, onProgress: () => {} }),
+    /refusé d'analyser/
+  );
+});
+
+test("flux SSE : une annulation pendant la lecture lève AbortError", async () => {
+  const controller = new AbortController();
+  const fetchFn = async () => ({
+    ok: true,
+    status: 200,
+    body: {
+      getReader: () => ({
+        read: () =>
+          new Promise((resolve, reject) => {
+            controller.signal.addEventListener("abort", () => reject(Object.assign(new Error("x"), { name: "AbortError" })));
+          }),
+      }),
+    },
+  });
+  const pending = get(loadContext(fetchFn), "callAnthropic")("clé", ctxOf("texte flux 6"), {
+    webSearch: false,
+    onProgress: () => {},
+    signal: controller.signal,
+  });
+  setTimeout(() => controller.abort(), 10);
+  await assert.rejects(pending, (error) => error.name === "AbortError");
+});
+
+// --- Régénération de la réponse ---------------------------------------------------------
+
+const ANALYSIS = {
+  statut: "Faux",
+  resume: "Le chiffre cité est inexact.",
+  rhetorique: [{ type: "Faux Dilemme", extrait: "soit on ferme", explication: "Choix binaire." }],
+  contexte: { probleme_detecte: true, explication: "Période omise." },
+  sources: [{ url: "https://www.insee.fr/fr/stat", description: "Taux de chômage" }],
+};
+
+test("callReply : un seul appel sans recherche, ton et cible dans le prompt, URL retirées", async () => {
+  const fetchFn = fakeFetch([
+    jsonResponse(200, {
+      content: [
+        { type: "tool_use", id: "t", name: "submit_reply", input: { reponse: "Selon l'INSEE, c'est 7 %. https://inventee.example/x" } },
+      ],
+    }),
+  ]);
+  const ctx = loadContext(fetchFn);
+  const reply = await get(ctx, "callReply")("clé", ctxOf("Le chômage a doublé", { pageTitle: "Post" }), ANALYSIS, {
+    model: "claude-haiku-5-5",
+    tone: "ferme",
+    target: "publication",
+    replyStyle: "detaille",
+  });
+
+  assert.equal(reply, "Selon l'INSEE, c'est 7 %.");
+  assert.equal(fetchFn.calls.length, 1);
+  const { body } = fetchFn.calls[0];
+  assert.equal(body.model, "claude-haiku-5-5");
+  assert.deepEqual(body.tools.map((t) => t.name), ["submit_reply"]);
+  assert.equal(body.tool_choice, undefined);
+  assert.deepEqual(plain(body.output_config), { effort: "low" });
+  assert.match(body.system, /N'ÉCRIS JAMAIS d'URL/);
+  assert.match(body.system, /RÈGLE ABSOLUE — NEUTRALITÉ/);
+  const prompt = body.messages[0].content;
+  assert.match(prompt, /la publication principale de la page/);
+  assert.match(prompt, /ferme mais courtois/);
+  assert.match(prompt, /détaillée \(700 caractères/);
+  assert.match(prompt, /Verdict déjà établi : Faux — Le chiffre cité est inexact\./);
+  assert.match(prompt, /- insee\.fr : Taux de chômage/);
+  assert.ok(!prompt.includes("https://www.insee.fr"), "l'URL n'est jamais donnée au modèle pour la réponse");
+});
+
+test("callReply : ton très court forcé à la longueur courte, sans source = pas de fait précis", async () => {
+  const fetchFn = fakeFetch([jsonResponse(200, { content: [{ type: "text", text: "Pouvez-vous citer votre source ?" }] })]);
+  const reply = await get(loadContext(fetchFn), "callReply")(
+    "clé",
+    ctxOf("Texte"),
+    { ...ANALYSIS, sources: [] },
+    { tone: "concis", replyStyle: "detaille" }
+  );
+  assert.equal(reply, "Pouvez-vous citer votre source ?", "texte libre accepté à défaut d'outil");
+  const prompt = fetchFn.calls[0].body.messages[0].content;
+  assert.match(prompt, /courte \(280 caractères/);
+  assert.match(prompt, /Aucune source vérifiée : n'affirme aucun chiffre/);
+});
+
+test("callReply : réponse vide acceptée, refus et erreurs signalés", async () => {
+  const empty = fakeFetch([jsonResponse(200, { content: [{ type: "tool_use", id: "t", name: "submit_reply", input: { reponse: "" } }] })]);
+  assert.equal(await get(loadContext(empty), "callReply")("clé", ctxOf("Texte"), ANALYSIS, {}), "");
+
+  const none = fakeFetch([jsonResponse(200, { content: [] })]);
+  await assert.rejects(get(loadContext(none), "callReply")("clé", ctxOf("Texte"), ANALYSIS, {}), /pas renvoyé de réponse/);
+
+  const refusal = fakeFetch([jsonResponse(200, { stop_reason: "refusal", content: [] })]);
+  await assert.rejects(get(loadContext(refusal), "callReply")("clé", ctxOf("Texte"), ANALYSIS, {}), /refusé/);
+
+  const bad = fakeFetch([jsonResponse(401, { error: { message: "invalid x-api-key" } })]);
+  await assert.rejects(get(loadContext(bad), "callReply")("clé", ctxOf("Texte"), ANALYSIS, {}), /Clé API Anthropic invalide/);
+});
+
+test("les tons et cibles de réponse sont cohérents avec l'interface", () => {
+  const ctx = loadContext(async () => {});
+  assert.deepEqual(plain(get(ctx, "Object.keys(REPLY_TONES)")), ["neutre", "ferme", "chaleureux", "question", "concis"]);
+  assert.deepEqual(plain(get(ctx, "Object.keys(REPLY_TARGETS)")), ["message", "publication"]);
+  const content = fs.readFileSync(path.join(EXT, "content.js"), "utf8");
+  for (const tone of Object.keys(plain(get(ctx, "REPLY_TONES")))) {
+    assert.ok(content.includes(`["${tone}",`), `ton ${tone} absent de l'interface`);
+  }
+  assert.ok(content.includes('value="publication"') && content.includes('value="message"'));
+  assert.equal(plain(get(ctx, "REPLY_SYSTEM_PROMPT")).includes("submit_reply"), true);
 });

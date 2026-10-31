@@ -107,13 +107,24 @@ les sources vérifiées (le lien vérifié est ajouté à la copie, décochable)
 reste vide quand il n'y a rien de factuel à répondre. Vous pouvez le
 modifier avant de le copier. Sélectionner un commentaire prépare une réponse
 à ce commentaire ; analyser la page entière prépare une réponse à la
-publication. Longueur courte (280 caractères) ou détaillée (700) au choix.
+publication. Longueur courte (280 caractères) ou détaillée (700) au choix
+dans les réglages.
+
+**Régénérer** : sous la réponse, choisissez un **ton** (neutre, ferme,
+chaleureux, par questions, très court) et une **cible** (ce message ou la
+publication), puis cliquez sur « Régénérer ». C'est un seul appel, sans
+nouvelle recherche web, donc rapide : il repart du verdict et des sources
+déjà vérifiés. En cas d'erreur, votre réponse précédente est conservée.
 
 ### Ergonomie
 
 - Pop-up **déplaçable**, **repliable**, qui tient dans la fenêtre, avec
   thème clair/sombre automatique ;
 - résumé d'abord, détails dans des sections repliables ;
+- **suivi en direct** : la réponse est lue en flux, le pop-up indique
+  l'étape (réflexion, recherche de sources, rédaction du verdict) et affiche
+  le **statut et le résumé provisoires** dès qu'ils sont écrits, avant la fin
+  de l'analyse ;
 - compteur de secondes pendant l'analyse, bouton **Annuler** (la requête
   est réellement interrompue) et **Réanalyser** ;
 - **Échap** ferme le pop-up ; bouton « Tester » pour vérifier la clé API ;
@@ -348,12 +359,12 @@ Prérequis : Node 20 ou plus récent. Aucune dépendance à installer.
 make test    # ou : node --test test/*.test.js
 ```
 
-La suite (36 tests) couvre, sans appel réseau (`fetch` est simulé) :
+La suite (45 tests) couvre, sans appel réseau (`fetch` est simulé) :
 cohérence du catalogue de sophismes entre schéma, prompt et validation ;
 validation de la sortie du modèle ; vérification des citations et des
 sources ; nettoyage de la réponse suggérée ; envoi des images, de la capture
 vidéo et des sous-titres ; nouvel essai sans images si l'API ne peut pas les
-télécharger ; flux en un appel et requête de secours autonome ; jamais de `tool_choice` forcé ; mode sans recherche ; refus du modèle ; migration des anciens modèles ;
+télécharger ; flux en un appel, lecture en flux (étapes, verdict partiel, erreur ou annulation en cours de flux), requête de secours autonome, régénération de la réponse (ton, cible, URL retirées) ; jamais de `tool_choice` forcé ; mode sans recherche ; refus du modèle ; migration des anciens modèles ;
 choix de l'outil de recherche selon le modèle ; cache ; annulation ;
 nouvelle tentative sur erreur transitoire (429/5xx/529) ; test de la clé ;
 extraction des sous-titres (WebVTT, YouTube) et choix des images ;
